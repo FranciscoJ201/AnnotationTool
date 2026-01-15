@@ -5,6 +5,7 @@ import cv2
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QCheckBox, QMessageBox, QScrollArea, QFrame, QGroupBox)
 from PyQt6.QtCore import Qt, QTimer
 from ultralytics import YOLO
+import torch
 
 # Import our custom modules
 from video_engine import VideoEngine
@@ -13,7 +14,7 @@ from annotator import AnnotationWidget, KEYPOINT_NAMES
 class JudoAppQt(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Judo Pose Annotator v8 (Per-Video Folders)")
+        self.setWindowTitle("Pose Annotator (Per-Video Folders)")
         self.resize(1300, 800)
 
         # --- PROJECT DIRECTORY SETUP ---
@@ -128,7 +129,7 @@ class JudoAppQt(QMainWindow):
         legend_group.setLayout(legend_layout)
         right_layout.addWidget(legend_group)
         
-        instr = QLabel("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n(Green=Vis, Red=Occ)")
+        instr = QLabel("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n(Green=Visible, Red=Occluded, Grey=Out Of Frame)")
         instr.setStyleSheet("color: black; font-size: 10px; font-weight: bold;")
         right_layout.addWidget(instr)
 
@@ -179,14 +180,44 @@ class JudoAppQt(QMainWindow):
             self.lbl_status.setText(f"Loaded: {filename} | Data Folder: /{self.current_video_name}")
 
     def load_yolo(self):
+        # We define the target engine file name
+        ENGINE_PATH = 'yolo11x-pose.engine'
+        
         try:
-            self.lbl_status.setText("Loading YOLOv11-pose...")
-            QApplication.processEvents()
-            self.model = YOLO("yolo11n-pose.pt") 
+            self.lbl_status.setText("Checking YOLO model status...")
+            QApplication.processEvents() # Force UI update before blocking op
+
+            if not os.path.exists(ENGINE_PATH):
+                if not torch.cuda.is_available():
+                    print('Swapping to Cpu, NO GPU detected')
+                    self.lbl_status.setText("No GPU detected. Falling back to CPU (Nano model)...")
+                    QApplication.processEvents()
+                    self.model = YOLO('yolo11n-pose.pt')
+                else:
+                    print(f"Exporting engine... (This may take a few minutes)")
+                    self.lbl_status.setText(f"GPU Detected! Exporting TensorRT Engine (Please Wait)...")
+                    QApplication.processEvents()
+                    
+                    # 1. Load the heavy X model
+                    model = YOLO('yolo11x-pose.pt')
+                    # 2. Export it to TensorRT (half=True for FP16 speedup)
+                    model.export(format='engine', half=True)
+                    
+                    # 3. Load the newly created engine
+                    self.lbl_status.setText("Export Complete! Loading Engine...")
+                    QApplication.processEvents()
+                    self.model = YOLO(ENGINE_PATH)
+            else:
+                self.lbl_status.setText(f"Loading cached Engine: {ENGINE_PATH}")
+                QApplication.processEvents()
+                self.model = YOLO(ENGINE_PATH)
+
             self.lbl_status.setText("YOLO Model Loaded!")
             self.btn_load_model.setStyleSheet("background-color: #d4edda")
+
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Could not load YOLO: {e}")
+            QMessageBox.critical(self, "Model Error", f"Could not load/export YOLO: {e}")
+            self.lbl_status.setText("Error loading model.")
 
     def toggle_play(self):
         self.is_playing = not self.is_playing
