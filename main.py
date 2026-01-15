@@ -192,7 +192,7 @@ class JudoAppQt(QMainWindow):
                     print('Swapping to Cpu, NO GPU detected')
                     self.lbl_status.setText("No GPU detected. Falling back to CPU (Nano model)...")
                     QApplication.processEvents()
-                    self.model = YOLO('yolo11n-pose.pt')
+                    self.model = YOLO('yolo26n-pose.pt')
                 else:
                     print(f"Exporting engine... (This may take a few minutes)")
                     self.lbl_status.setText(f"GPU Detected! Exporting TensorRT Engine (Please Wait)...")
