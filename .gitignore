@@ -1,0 +1,8 @@
+**/*.json
+**/*.jpg
+**/*.mp4
+judo_dataset
+**/*.pt
+**/*.onnx
+**/*.engine
+**/*.pyc
