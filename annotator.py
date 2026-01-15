@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QLabel
-from PyQt6.QtCore import Qt, QPointF
+from PyQt6.QtCore import Qt, QPointF, QRectF
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QBrush, QFont
 
 # --- COCO SKELETON CONFIG ---
@@ -77,8 +77,9 @@ class AnnotationWidget(QLabel):
             painter.drawPixmap(int(self.offset_x), int(self.offset_y), dest_w, dest_h, self.image_pixmap)
 
         # 2. Draw Annotations
+        # Use a slightly smaller font (8pt) so it fits inside the dots
         if self.show_numbers:
-            font = QFont("Arial", 10, QFont.Weight.Bold)
+            font = QFont("Arial", 8, QFont.Weight.Bold)
             painter.setFont(font)
 
         for p_idx, person in enumerate(self.annotations):
@@ -111,10 +112,17 @@ class AnnotationWidget(QLabel):
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawEllipse(screen_pos, r, r)
                 
+                # --- NEW CENTERED TEXT LOGIC ---
                 if self.show_numbers:
-                    painter.setPen(QColor(255, 255, 255))
-                    text_pos = screen_pos + QPointF(8, -8) 
-                    painter.drawText(text_pos, str(k_idx))
+                    # Black text usually looks best on colored dots
+                    painter.setPen(QColor(0, 0, 0)) 
+                    
+                    # Create a rectangle exactly covering the dot
+                    # We use (2*r) because r is radius, we need diameter
+                    text_rect = QRectF(screen_pos.x() - r, screen_pos.y() - r, r*2, r*2)
+                    
+                    # Draw text aligned to the center of that rectangle
+                    painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, str(k_idx))
 
     def mousePressEvent(self, event):
         if not self.annotations: return
@@ -136,10 +144,9 @@ class AnnotationWidget(QLabel):
             
             if event.button() == Qt.MouseButton.RightButton:
                 kp = self.annotations[self.selected_person_idx]['keypoints'][self.selected_kpt_idx]
-                # Toggle: Green(2) -> Red(1) -> Grey(0) -> Green(2)
                 kp[2] = 1 if kp[2] == 2 else (0 if kp[2] == 1 else 2)
                 
-                # FIX 1: Clear selection IMMEDIATELY after toggle
+                # Clear selection immediately
                 self.selected_person_idx = -1
                 self.selected_kpt_idx = -1
                 self.update()
@@ -162,7 +169,7 @@ class AnnotationWidget(QLabel):
 
     def mouseReleaseEvent(self, event):
         self.dragging = False
-        # FIX 2: Clear selection on mouse release (so it doesn't stay yellow after dragging)
+        # Clear selection on release
         self.selected_person_idx = -1
         self.selected_kpt_idx = -1
         self.update()

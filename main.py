@@ -2,9 +2,7 @@ import sys
 import os
 import shutil
 import cv2
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, 
-                             QCheckBox, QMessageBox, QScrollArea, QFrame, QGroupBox)
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QCheckBox, QMessageBox, QScrollArea, QFrame, QGroupBox)
 from PyQt6.QtCore import Qt, QTimer
 from ultralytics import YOLO
 

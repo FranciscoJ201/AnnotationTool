@@ -6,3 +6,4 @@ judo_dataset
 **/*.onnx
 **/*.engine
 **/*.pyc
+runs
