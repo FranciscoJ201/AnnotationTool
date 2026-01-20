@@ -329,6 +329,9 @@ class JudoAppQt(QMainWindow):
             self.current_frame_img = img
             self.annotator.set_image(img)
             
+            self.annotator.selected_person_idx = -1
+            self.annotator.selected_kpt_idx = -1
+            
             if self.try_load_existing_labels(idx):
                 self.lbl_status.setText(f"Frame {idx}: Loaded Saved Labels ✅")
                 self.btn_save.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
