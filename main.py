@@ -2,10 +2,12 @@ import sys
 import os
 import shutil
 import cv2
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QCheckBox, QMessageBox, QScrollArea, QFrame, QGroupBox)
+import torch 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, 
+                             QCheckBox, QMessageBox, QScrollArea, QFrame, QGroupBox)
 from PyQt6.QtCore import Qt, QTimer
 from ultralytics import YOLO
-import torch
 
 # Import our custom modules
 from video_engine import VideoEngine
@@ -14,20 +16,18 @@ from annotator import AnnotationWidget, KEYPOINT_NAMES
 class JudoAppQt(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Pose Annotator (Per-Video Folders)")
+        self.setWindowTitle("Judo Pose Annotator v10 (Manual Add Person)")
         self.resize(1300, 800)
 
         # --- PROJECT DIRECTORY SETUP ---
         self.project_root = os.path.join(os.getcwd(), "judo_dataset")
         
-        # 1. We keep a central place for the RAW videos
         self.videos_storage_dir = os.path.join(self.project_root, "videos")
         os.makedirs(self.videos_storage_dir, exist_ok=True)
 
-        # These will be set dynamically when a video is loaded
-        self.current_video_name = ""     # e.g., "match_01"
-        self.current_images_dir = ""     # e.g., ".../match_01/images"
-        self.current_labels_dir = ""     # e.g., ".../match_01/labels"
+        self.current_video_name = ""
+        self.current_images_dir = ""
+        self.current_labels_dir = ""
 
         self.engine = VideoEngine()
         self.model = None 
@@ -73,7 +73,7 @@ class JudoAppQt(QMainWindow):
         self.btn_load_model.clicked.connect(self.load_yolo)
         self.chk_auto = QCheckBox("Auto-Guess New Frames")
         self.chk_auto.setChecked(True)
-        self.btn_save = QPushButton("💾 Save Pair (Img+Txt)")
+        self.btn_save = QPushButton("💾 Save Pair")
         self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
         self.btn_save.clicked.connect(self.save_pair)
         
@@ -106,6 +106,12 @@ class JudoAppQt(QMainWindow):
         """)
         right_layout = QVBoxLayout(right_panel)
 
+        # NEW BUTTON: ADD PERSON
+        self.btn_add_person = QPushButton("+ Add Person")
+        self.btn_add_person.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 5px;")
+        self.btn_add_person.clicked.connect(self.manual_add_person)
+        right_layout.addWidget(self.btn_add_person)
+
         self.chk_show_nums = QCheckBox("Show Keypoint #")
         self.chk_show_nums.setStyleSheet("font-weight: bold; padding: 5px; color: black;")
         self.chk_show_nums.toggled.connect(self.toggle_numbers)
@@ -129,7 +135,7 @@ class JudoAppQt(QMainWindow):
         legend_group.setLayout(legend_layout)
         right_layout.addWidget(legend_group)
         
-        instr = QLabel("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n(Green=Visible, Red=Occluded, Grey=Out Of Frame)")
+        instr = QLabel("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n(Green=Vis, Red=Occ)")
         instr.setStyleSheet("color: black; font-size: 10px; font-weight: bold;")
         right_layout.addWidget(instr)
 
@@ -140,14 +146,72 @@ class JudoAppQt(QMainWindow):
         self.annotator.show_numbers = checked
         self.annotator.update()
 
+    # --- NEW: Manual Add Person Logic ---
+    def manual_add_person(self):
+        # Create a default "Standing Pose" in the center of the screen
+        # Coordinates are Normalized (0.0 to 1.0)
+        
+        # Center X, Y
+        cx, cy = 0.5, 0.5 
+        
+        # Offsets for a simple stick figure
+        head_y = cy - 0.3
+        shoulder_y = cy - 0.2
+        hip_y = cy + 0.05
+        knee_y = cy + 0.2
+        ankle_y = cy + 0.35
+        
+        width = 0.05 # Half-width for arms/legs
+        
+        # 17 Keypoints (x, y, visibility=2)
+        # 0:Nose, 1:LEye, 2:REye, 3:LEar, 4:REar
+        # 5:LSh, 6:RSh, 7:LElb, 8:RElb, 9:LWri, 10:RWri
+        # 11:LHip, 12:RHip, 13:LKnee, 14:RKnee, 15:LAnk, 16:RAnk
+        
+        new_kpts = [
+            [cx, head_y, 2],          # 0 Nose
+            [cx+0.01, head_y-0.01, 2], # 1 LEye
+            [cx-0.01, head_y-0.01, 2], # 2 REye
+            [cx+0.02, head_y, 2],     # 3 LEar
+            [cx-0.02, head_y, 2],     # 4 REar
+            
+            [cx+width, shoulder_y, 2], # 5 LShoulder
+            [cx-width, shoulder_y, 2], # 6 RShoulder
+            
+            [cx+width+0.05, shoulder_y+0.1, 2], # 7 LElbow
+            [cx-width-0.05, shoulder_y+0.1, 2], # 8 RElbow
+            
+            [cx+width+0.05, shoulder_y+0.2, 2], # 9 LWrist
+            [cx-width-0.05, shoulder_y+0.2, 2], # 10 RWrist
+            
+            [cx+width, hip_y, 2],     # 11 LHip
+            [cx-width, hip_y, 2],     # 12 RHip
+            
+            [cx+width, knee_y, 2],    # 13 LKnee
+            [cx-width, knee_y, 2],    # 14 RKnee
+            
+            [cx+width, ankle_y, 2],   # 15 LAnkle
+            [cx-width, ankle_y, 2],   # 16 RAnkle
+        ]
+        
+        # Default Bbox (Center)
+        new_person = {
+            'bbox': [0.5, 0.5, 0.3, 0.8], 
+            'keypoints': new_kpts
+        }
+        
+        self.annotator.annotations.append(new_person)
+        self.annotator.update()
+        
+        # Reset Save button color since we modified data
+        self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+
     def load_video(self):
-        # 1. Select File
         path, _ = QFileDialog.getOpenFileName(self, "Import Video", "", "Video (*.mp4 *.avi *.mov)")
         if path:
             filename = os.path.basename(path)
-            
-            # 2. Copy to Central Video Storage if needed
             destination_path = os.path.join(self.videos_storage_dir, filename)
+            
             if os.path.abspath(path) != os.path.abspath(destination_path):
                 try:
                     self.lbl_status.setText(f"Importing video...")
@@ -157,15 +221,10 @@ class JudoAppQt(QMainWindow):
                     QMessageBox.warning(self, "Import Error", f"Could not copy video: {e}")
                     return
 
-            # 3. Initialize Engine
             self.current_video_path = destination_path
             count = self.engine.load_video(self.current_video_path)
             
-            # 4. SETUP PER-VIDEO FOLDER STRUCTURE
-            # Extract "match_01" from "match_01.mp4"
             self.current_video_name = os.path.splitext(filename)[0]
-            
-            # judo_dataset/match_01/
             video_dataset_root = os.path.join(self.project_root, self.current_video_name)
             self.current_images_dir = os.path.join(video_dataset_root, "images")
             self.current_labels_dir = os.path.join(video_dataset_root, "labels")
@@ -173,37 +232,29 @@ class JudoAppQt(QMainWindow):
             os.makedirs(self.current_images_dir, exist_ok=True)
             os.makedirs(self.current_labels_dir, exist_ok=True)
             
-            # 5. UI Updates
             self.slider.setRange(0, count - 1)
             self.slider.setValue(0)
             self.seek_frame(0)
             self.lbl_status.setText(f"Loaded: {filename} | Data Folder: /{self.current_video_name}")
 
     def load_yolo(self):
-        # We define the target engine file name
         ENGINE_PATH = 'yolo11x-pose.engine'
-        
         try:
             self.lbl_status.setText("Checking YOLO model status...")
-            QApplication.processEvents() # Force UI update before blocking op
+            QApplication.processEvents()
 
             if not os.path.exists(ENGINE_PATH):
                 if not torch.cuda.is_available():
                     print('Swapping to Cpu, NO GPU detected')
                     self.lbl_status.setText("No GPU detected. Falling back to CPU (Nano model)...")
                     QApplication.processEvents()
-                    self.model = YOLO('yolo26n-pose.pt')
+                    self.model = YOLO('yolo11n-pose.pt')
                 else:
-                    print(f"Exporting engine... (This may take a few minutes)")
+                    print(f"Exporting engine...")
                     self.lbl_status.setText(f"GPU Detected! Exporting TensorRT Engine (Please Wait)...")
                     QApplication.processEvents()
-                    
-                    # 1. Load the heavy X model
                     model = YOLO('yolo11x-pose.pt')
-                    # 2. Export it to TensorRT (half=True for FP16 speedup)
                     model.export(format='engine', half=True)
-                    
-                    # 3. Load the newly created engine
                     self.lbl_status.setText("Export Complete! Loading Engine...")
                     QApplication.processEvents()
                     self.model = YOLO(ENGINE_PATH)
@@ -273,7 +324,6 @@ class JudoAppQt(QMainWindow):
             self.current_frame_img = img
             self.annotator.set_image(img)
             
-            # Check Per-Video Label Folder
             if self.try_load_existing_labels(idx):
                 self.lbl_status.setText(f"Frame {idx}: Loaded Saved Labels ✅")
                 self.btn_save.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
@@ -289,13 +339,9 @@ class JudoAppQt(QMainWindow):
 
     def try_load_existing_labels(self, idx):
         if not self.current_labels_dir: return False
-        
-        # Look in the specific video's label folder
         filename = f"{self.current_video_name}_{idx:06d}.txt"
         path = os.path.join(self.current_labels_dir, filename)
-        
-        if not os.path.exists(path):
-            return False
+        if not os.path.exists(path): return False
         
         new_annotations = []
         try:
@@ -341,10 +387,8 @@ class JudoAppQt(QMainWindow):
             return
         if self.current_frame_img is None: return
 
-        # 1. Generate Filename Base (uses the video name + frame)
         base_filename = f"{self.current_video_name}_{self.engine.current_frame_index:06d}"
         
-        # 2. Save Text Label to specific labels folder
         txt_path = os.path.join(self.current_labels_dir, f"{base_filename}.txt")
         try:
             with open(txt_path, "w") as f:
@@ -358,7 +402,6 @@ class JudoAppQt(QMainWindow):
             QMessageBox.critical(self, "Save Error", f"Txt Error: {e}")
             return
 
-        # 3. Save Image (JPG) to specific images folder
         img_path = os.path.join(self.current_images_dir, f"{base_filename}.jpg")
         try:
             bgr_img = cv2.cvtColor(self.current_frame_img, cv2.COLOR_RGB2BGR)
