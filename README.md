@@ -74,21 +74,6 @@ YOLO cannot train on the raw `judo_dataset` folder directly. You must split it i
     ```
 3.  This creates a clean folder at `datasets/judo_pose` with shuffled `train` and `val` subfolders.
 
-### 3. Training the Model
-1.  Create a config file named `judo_pose.yaml` in your root directory:
-    ```yaml
-    path: datasets/judo_pose
-    train: train/images
-    val: val/images
-    kpt_shape: [17, 3]
-    flip_idx: [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
-    names:
-      0: person
-    ```
-2.  Run the training command (ensure you are inside the project root):
-    ```bash
-    yolo pose train data=judo_pose.yaml model=yolo11n-pose.pt epochs=100 imgsz=640
-    ```
 
 ## ⚠️ Important Notes
 * **Bounding Boxes:** The tool saves the bounding box *exactly* as it appears on screen. If you move a hand outside the box, **you must resize the box manually** using the yellow handles, or the training data will be invalid.
