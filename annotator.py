@@ -24,6 +24,7 @@ class AnnotationWidget(QLabel):
         self.setStyleSheet("background-color: #222;")
         
         self.show_numbers = False 
+        self.focus_mode = False  # <--- NEW: Focus Mode Flag
         
         self.image_pixmap = None
         self.original_image_size = (0, 0)
@@ -84,21 +85,32 @@ class AnnotationWidget(QLabel):
             painter.drawPixmap(int(self.offset_x), int(self.offset_y), dest_w, dest_h, self.image_pixmap)
 
         # 2. Draw Annotations
-        if self.show_numbers:
-            font = QFont("Arial", 8, QFont.Weight.Bold)
-            painter.setFont(font)
+        font = QFont("Arial", 8, QFont.Weight.Bold)
+        painter.setFont(font)
 
         for p_idx, person in enumerate(self.annotations):
             kpts = person['keypoints']
             bbox = person.get('bbox', [0,0,0,0])
             
-            # --- Draw Bounding Box ---
-            # Only show handles/bright color if this person is selected
             is_selected = (p_idx == self.selected_person_idx)
-            self.draw_bbox(painter, bbox, is_selected)
+            
+            # --- FOCUS MODE LOGIC ---
+            # If Focus Mode is ON and this person is NOT selected, make them a "Ghost"
+            if self.focus_mode and self.selected_person_idx != -1 and not is_selected:
+                opacity_factor = 40  # Very transparent (0-255)
+                is_ghost = True
+            else:
+                opacity_factor = 255 # Opaque
+                is_ghost = False
+
+            # --- Draw Bounding Box ---
+            self.draw_bbox(painter, bbox, is_selected, opacity_factor)
 
             # --- Draw Skeleton Lines ---
-            painter.setPen(QPen(QColor(0, 255, 255, 100), 2)) 
+            line_color = QColor(0, 255, 255, 100)
+            line_color.setAlpha(min(100, opacity_factor)) # Clamp alpha
+            painter.setPen(QPen(line_color, 2)) 
+            
             for i1, i2 in SKELETON_CONNECTIONS:
                 p1 = self.norm_to_screen(kpts[i1][0], kpts[i1][1])
                 p2 = self.norm_to_screen(kpts[i2][0], kpts[i2][1])
@@ -109,29 +121,31 @@ class AnnotationWidget(QLabel):
                 screen_pos = self.norm_to_screen(nx, ny)
                 
                 # Color Logic
-                if vis == 2:   color = QColor(0, 255, 0)       # Green (Visible)
-                elif vis == 1: color = QColor(255, 0, 0)       # Red (Occluded)
-                else:          color = QColor(100, 100, 100)   # Grey (Hidden)
+                if vis == 2:   base_color = QColor(0, 255, 0)       # Green (Visible)
+                elif vis == 1: base_color = QColor(255, 0, 0)       # Red (Occluded)
+                else:          base_color = QColor(100, 100, 100)   # Grey (Hidden)
                 
-                # Selection Highlight
-                if is_selected and k_idx == self.selected_kpt_idx:
+                base_color.setAlpha(opacity_factor)
+                
+                # Selection Highlight (Only if not a ghost)
+                if is_selected and k_idx == self.selected_kpt_idx and not is_ghost:
                     painter.setBrush(QBrush(QColor(255, 255, 0))) # Yellow
                     r = self.radius + 3
                 else:
-                    painter.setBrush(QBrush(color))
+                    painter.setBrush(QBrush(base_color))
                     r = self.radius
                 
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawEllipse(screen_pos, r, r)
                 
-                if self.show_numbers:
+                # Draw Numbers (Hide numbers for ghosts to reduce clutter)
+                if self.show_numbers and not is_ghost:
                     painter.setPen(QColor(0, 0, 0)) 
                     text_rect = QRectF(screen_pos.x() - r, screen_pos.y() - r, r*2, r*2)
                     painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, str(k_idx))
 
-    def draw_bbox(self, painter, bbox_norm, is_selected):
+    def draw_bbox(self, painter, bbox_norm, is_selected, alpha):
         cx, cy, w, h = bbox_norm
-        # Convert Center-WH to TopLeft-WH for Qt
         x_tl = cx - w/2
         y_tl = cy - h/2
         
@@ -140,20 +154,24 @@ class AnnotationWidget(QLabel):
         rect = QRectF(pt1, pt2)
         
         if is_selected:
-            color = QColor(255, 255, 0, 200) # Yellow for selected
+            color = QColor(255, 255, 0, 200) # Yellow
             style = Qt.PenStyle.SolidLine
             width = 2
         else:
-            color = QColor(200, 200, 200, 80) # Faint grey for others
+            color = QColor(200, 200, 200, 80) # Faint grey
             style = Qt.PenStyle.DashLine
             width = 1
+
+        # Apply Ghost transparency
+        if alpha < 255:
+            color.setAlpha(min(color.alpha(), alpha))
 
         painter.setPen(QPen(color, width, style))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(rect)
 
-        # Draw handles if selected
-        if is_selected:
+        # Draw handles only if selected (never for ghosts)
+        if is_selected and alpha == 255:
             handles = [rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()]
             painter.setBrush(QBrush(QColor(255, 255, 0)))
             painter.setPen(Qt.PenStyle.NoPen)
@@ -162,18 +180,15 @@ class AnnotationWidget(QLabel):
                                         self.handle_size, self.handle_size))
 
     def get_bbox_handles(self, bbox_norm):
-        """Returns screen coordinates of the 4 corners: TL, TR, BR, BL"""
         cx, cy, w, h = bbox_norm
         x_tl = cx - w/2
         y_tl = cy - h/2
         x_br = cx + w/2
         y_br = cy + h/2
-        
         pt_tl = self.norm_to_screen(x_tl, y_tl)
         pt_tr = self.norm_to_screen(x_br, y_tl)
         pt_br = self.norm_to_screen(x_br, y_br)
         pt_bl = self.norm_to_screen(x_tl, y_br)
-        
         return [pt_tl, pt_tr, pt_br, pt_bl]
 
     def mousePressEvent(self, event):
@@ -185,14 +200,11 @@ class AnnotationWidget(QLabel):
             person = self.annotations[self.selected_person_idx]
             bbox = person.get('bbox', [0,0,0,0])
             handles = self.get_bbox_handles(bbox)
-            
             for i, pt in enumerate(handles):
-                # Check if click is near handle
-                dist = (pt - click_pos).manhattanLength()
-                if dist < 15: # Tolerance
+                if (pt - click_pos).manhattanLength() < 15:
                     self.dragging_bbox = True
                     self.bbox_handle_idx = i
-                    self.dragging = True # Set global dragging flag
+                    self.dragging = True 
                     return
 
         # 2. Check Keypoints
@@ -200,6 +212,10 @@ class AnnotationWidget(QLabel):
         best_match = None
         
         for p_idx, person in enumerate(self.annotations):
+            # Focus Mode Filter: If ON, ignore clicks on non-selected people (Ghosts)
+            if self.focus_mode and self.selected_person_idx != -1 and p_idx != self.selected_person_idx:
+                continue
+
             for k_idx, (nx, ny, vis) in enumerate(person['keypoints']):
                 s_point = self.norm_to_screen(nx, ny)
                 dist = (QPointF(s_point) - click_pos).manhattanLength()
@@ -209,19 +225,20 @@ class AnnotationWidget(QLabel):
 
         if best_match:
             self.selected_person_idx, self.selected_kpt_idx = best_match
-            self.dragging_bbox = False # Ensure we aren't moving bbox
+            self.dragging_bbox = False 
             
             if event.button() == Qt.MouseButton.RightButton:
                 kp = self.annotations[self.selected_person_idx]['keypoints'][self.selected_kpt_idx]
                 kp[2] = 1 if kp[2] == 2 else (0 if kp[2] == 1 else 2)
-                # Don't clear selection on right click so you can see change
                 self.update()
                 
             elif event.button() == Qt.MouseButton.LeftButton:
                 self.dragging = True
                 self.update()
         else:
-            # Clicked empty space: Deselect
+            # Only deselect if we aren't in Focus Mode
+            # (In Focus Mode, clicking empty space usually means "I missed the dot", not "I want to exit focus")
+            # But for standard UI behavior, let's allow deselection to exit focus naturally
             self.selected_person_idx = -1
             self.selected_kpt_idx = -1
             self.dragging_bbox = False
@@ -232,31 +249,20 @@ class AnnotationWidget(QLabel):
         
         nx, ny = self.screen_to_norm(event.position().x(), event.position().y())
 
-        # --- BBOX DRAGGING LOGIC ---
         if self.dragging_bbox and self.selected_person_idx != -1:
             person = self.annotations[self.selected_person_idx]
             cx, cy, w, h = person['bbox']
-            
-            # Convert Center-WH to x min/max, y min/max
             x1, y1 = cx - w/2, cy - h/2
             x2, y2 = cx + w/2, cy + h/2
             
-            # Update specific corner
-            # 0:TL, 1:TR, 2:BR, 3:BL
-            if self.bbox_handle_idx == 0:   # Top-Left
-                x1, y1 = nx, ny
-            elif self.bbox_handle_idx == 1: # Top-Right
-                x2, y1 = nx, ny
-            elif self.bbox_handle_idx == 2: # Bottom-Right
-                x2, y2 = nx, ny
-            elif self.bbox_handle_idx == 3: # Bottom-Left
-                x1, y2 = nx, ny
+            if self.bbox_handle_idx == 0: x1, y1 = nx, ny
+            elif self.bbox_handle_idx == 1: x2, y1 = nx, ny
+            elif self.bbox_handle_idx == 2: x2, y2 = nx, ny
+            elif self.bbox_handle_idx == 3: x1, y2 = nx, ny
                 
-            # Normalize so x1 < x2
             final_x1, final_x2 = min(x1, x2), max(x1, x2)
             final_y1, final_y2 = min(y1, y2), max(y1, y2)
             
-            # Convert back to Center-WH
             new_w = final_x2 - final_x1
             new_h = final_y2 - final_y1
             new_cx = final_x1 + new_w/2
@@ -265,7 +271,6 @@ class AnnotationWidget(QLabel):
             person['bbox'] = [new_cx, new_cy, new_w, new_h]
             self.update()
 
-        # --- KEYPOINT DRAGGING LOGIC ---
         elif self.selected_person_idx != -1 and self.selected_kpt_idx != -1:
             kp = self.annotations[self.selected_person_idx]['keypoints'][self.selected_kpt_idx]
             kp[0] = nx
@@ -276,7 +281,6 @@ class AnnotationWidget(QLabel):
         self.dragging = False
         self.dragging_bbox = False
         self.bbox_handle_idx = -1
-        # Do not clear selection here so bbox stays visible
         self.update()
 
     def norm_to_screen(self, nx, ny):
@@ -289,5 +293,4 @@ class AnnotationWidget(QLabel):
         img_w, img_h = self.original_image_size
         nx = (sx - self.offset_x) / self.scale_factor / img_w
         ny = (sy - self.offset_y) / self.scale_factor / img_h
-        # Allow dragging slightly outside image for bbox, but clamp generally
         return nx, ny

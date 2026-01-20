@@ -111,7 +111,12 @@ class JudoAppQt(QMainWindow):
         self.btn_add_person.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 5px;")
         self.btn_add_person.clicked.connect(self.manual_add_person)
         right_layout.addWidget(self.btn_add_person)
-
+        # --- [NEW] FOCUS MODE CHECKBOX ---
+        self.chk_focus = QCheckBox("Focus Selected (F)")
+        self.chk_focus.setStyleSheet("font-weight: bold; padding: 5px; color: black;")
+        self.chk_focus.toggled.connect(self.toggle_focus)
+        right_layout.addWidget(self.chk_focus)
+        # ----------------------------------
         self.chk_show_nums = QCheckBox("Show Keypoint #")
         self.chk_show_nums.setStyleSheet("font-weight: bold; padding: 5px; color: black;")
         self.chk_show_nums.toggled.connect(self.toggle_numbers)
@@ -412,7 +417,18 @@ class JudoAppQt(QMainWindow):
             
         self.lbl_status.setText(f"Saved to /{self.current_video_name}: {base_filename}")
         self.btn_save.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
+    def toggle_focus(self, checked):
+        """Pass the checkbox state to the annotator widget"""
+        self.annotator.focus_mode = checked
+        self.annotator.update()
 
+    def keyPressEvent(self, event):
+        """Shortcut to toggle focus mode with 'F' key"""
+        if event.key() == Qt.Key.Key_F:
+            # Toggle the checkbox (which triggers the logic above)
+            self.chk_focus.setChecked(not self.chk_focus.isChecked())
+        else:
+            super().keyPressEvent(event)
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = JudoAppQt()
