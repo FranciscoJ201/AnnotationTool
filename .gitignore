@@ -7,3 +7,4 @@ judo_dataset
 **/*.engine
 **/*.pyc
 runs
+datasets
