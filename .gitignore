@@ -1,7 +1,7 @@
 **/*.json
 **/*.jpg
 **/*.mp4
-judo_dataset
+judo_datasetDONTDELETE
 **/*.pt
 **/*.onnx
 **/*.engine

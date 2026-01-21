@@ -16,11 +16,11 @@ from annotator import AnnotationWidget, KEYPOINT_NAMES
 class JudoAppQt(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Judo Pose Annotator v10 (Manual Add Person)")
+        self.setWindowTitle("Judo Pose Annotator (Manual Add Person)")
         self.resize(1300, 800)
 
         # --- PROJECT DIRECTORY SETUP ---
-        self.project_root = os.path.join(os.getcwd(), "judo_dataset")
+        self.project_root = os.path.join(os.getcwd(), "judo_datasetDONTDELETE")
         
         self.videos_storage_dir = os.path.join(self.project_root, "videos")
         os.makedirs(self.videos_storage_dir, exist_ok=True)
@@ -253,7 +253,8 @@ class JudoAppQt(QMainWindow):
                     print('Swapping to Cpu, NO GPU detected')
                     self.lbl_status.setText("No GPU detected. Falling back to CPU (Nano model)...")
                     QApplication.processEvents()
-                    self.model = YOLO('yolo11n-pose.pt')
+                    self.model = YOLO('runs/dry_run/weights/best.pt')
+                    
                 else:
                     print(f"Exporting engine...")
                     self.lbl_status.setText(f"GPU Detected! Exporting TensorRT Engine (Please Wait)...")
@@ -269,6 +270,7 @@ class JudoAppQt(QMainWindow):
                 self.model = YOLO(ENGINE_PATH)
 
             self.lbl_status.setText("YOLO Model Loaded!")
+            print(f'Loaded Model: {self.model.model_name}')
             self.btn_load_model.setStyleSheet("background-color: #d4edda")
 
         except Exception as e:

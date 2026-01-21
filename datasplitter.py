@@ -4,7 +4,7 @@ import random
 import glob
 
 # --- CONFIG ---
-SOURCE_ROOT = "judo_dataset"         # Your tool's output folder
+SOURCE_ROOT = "judo_datasetDONTDELETE"         # Your tool's output folder
 DEST_ROOT = "datasets/judo_pose"     # The folder YOLO will actually use
 TRAIN_RATIO = 0.8                    # 80% Training, 20% Validation
 
@@ -44,6 +44,7 @@ def main():
         label_path = img_path.replace("images", "labels").replace(".jpg", ".txt")
         if os.path.exists(label_path):
             pairs.append((img_path, label_path))
+           
     
     # 3. Split
     random.shuffle(pairs)
@@ -64,3 +65,4 @@ def main():
 if __name__ == "__main__":
     main()
     print('done')
+  
