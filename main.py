@@ -243,39 +243,67 @@ class JudoAppQt(QMainWindow):
             self.lbl_status.setText(f"Loaded: {filename} | Data Folder: /{self.current_video_name}")
 
     def load_yolo(self):
+        """
+        Attempts to load the TensorRT engine first. 
+        If hardware (GPU) or software (TensorRT/Export libs) fails, 
+        gracefully falls back to the CPU model.
+        """
         ENGINE_PATH = 'yolo11x-pose.engine'
-        try:
-            self.lbl_status.setText("Checking YOLO model status...")
-            QApplication.processEvents()
+        CPU_MODEL_PATH = 'runs/dry_run2/weights/best.pt' # Your CPU/Nano model path
+        GPU_SOURCE_PT = 'yolo11x-pose.pt' # Source for export
+        
+        self.lbl_status.setText("Checking YOLO model status...")
+        QApplication.processEvents()
 
-            if not os.path.exists(ENGINE_PATH):
-                if not torch.cuda.is_available():
-                    print('Swapping to Cpu, NO GPU detected')
-                    self.lbl_status.setText("No GPU detected. Falling back to CPU (Nano model)...")
+        model_loaded = False
+
+        # --- 1. Attempt GPU/TensorRT Load ---
+        if torch.cuda.is_available():
+            try:
+                if os.path.exists(ENGINE_PATH):
+                    self.lbl_status.setText(f"Loading cached Engine: {ENGINE_PATH}")
                     QApplication.processEvents()
-                    self.model = YOLO('runs/dry_run/weights/best.pt')
-                    
+                    self.model = YOLO(ENGINE_PATH)
+                    model_loaded = True
                 else:
-                    print(f"Exporting engine...")
-                    self.lbl_status.setText(f"GPU Detected! Exporting TensorRT Engine (Please Wait)...")
+                    print("GPU Detected! Checking export capability...")
+                    self.lbl_status.setText("GPU Detected! Attempting TensorRT Export...")
                     QApplication.processEvents()
-                    model = YOLO('yolo11x-pose.pt')
+                    
+                    # Attempt export - this will raise an exception if TensorRT libs are missing
+                    model = YOLO(GPU_SOURCE_PT)
                     model.export(format='engine', half=True)
+                    
                     self.lbl_status.setText("Export Complete! Loading Engine...")
                     QApplication.processEvents()
                     self.model = YOLO(ENGINE_PATH)
-            else:
-                self.lbl_status.setText(f"Loading cached Engine: {ENGINE_PATH}")
+                    model_loaded = True
+                    
+            except Exception as e:
+                # This catches missing TensorRT, OOM errors, or export failures
+                print(f"Warning: GPU acceleration failed. Error: {e}")
+                self.lbl_status.setText(f"GPU Error: {e}. Switching to CPU...")
                 QApplication.processEvents()
-                self.model = YOLO(ENGINE_PATH)
+                model_loaded = False # Trigger fallback
+        
+        # --- 2. Fallback to CPU ---
+        if not model_loaded:
+            try:
+                print('Falling back to CPU model...')
+                self.lbl_status.setText(f"Loading CPU Model ({os.path.basename(CPU_MODEL_PATH)})...")
+                QApplication.processEvents()
+                self.model = YOLO(CPU_MODEL_PATH)
+                model_loaded = True
+            except Exception as e:
+                QMessageBox.critical(self, "Model Error", f"Critical: Could not load CPU model: {e}")
+                self.lbl_status.setText("Error loading model.")
+                return
 
-            self.lbl_status.setText("YOLO Model Loaded!")
+        # Final Success State
+        if model_loaded:
+            self.lbl_status.setText(f"YOLO Model Loaded: {self.model.model_name}")
             print(f'Loaded Model: {self.model.model_name}')
             self.btn_load_model.setStyleSheet("background-color: #d4edda")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Model Error", f"Could not load/export YOLO: {e}")
-            self.lbl_status.setText("Error loading model.")
 
     def toggle_play(self):
         self.is_playing = not self.is_playing
