@@ -2,6 +2,7 @@
 **/*.jpg
 **/*.mp4
 judo_datasetDONTDELETE
+judo_dataset 
 **/*.pt
 **/*.onnx
 **/*.engine
