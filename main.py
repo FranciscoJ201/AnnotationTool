@@ -5,7 +5,8 @@ import cv2
 import torch 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, 
-                             QCheckBox, QMessageBox, QScrollArea, QFrame, QGroupBox)
+                             QCheckBox, QMessageBox, QScrollArea, QFrame, QGroupBox,
+                             QRadioButton, QButtonGroup, QInputDialog)
 from PyQt6.QtCore import Qt, QTimer
 from ultralytics import YOLO
 
@@ -16,23 +17,32 @@ from annotator import AnnotationWidget, KEYPOINT_NAMES
 class JudoAppQt(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Judo Pose Annotator (Manual Add Person)")
+        self.setWindowTitle("Judo Annotation Suite")
         self.resize(1300, 800)
+
+        # --- STATE MANAGEMENT ---
+        # "pose" or "detect"
+        self.app_mode = "pose" 
 
         # --- PROJECT DIRECTORY SETUP ---
         self.project_root = os.path.join(os.getcwd(), "judo_datasetDONTDELETE")
-        
         self.videos_storage_dir = os.path.join(self.project_root, "videos")
+        
+        # Define the global classes file path
+        self.classes_file_path = os.path.join(self.project_root, "classes.txt")
+        
         os.makedirs(self.videos_storage_dir, exist_ok=True)
 
         self.current_video_name = ""
-        self.current_images_dir = ""
-        self.current_labels_dir = ""
+        self.current_video_path = ""
+        
+        # These update dynamically based on mode
+        self.active_images_dir = ""
+        self.active_labels_dir = ""
 
         self.engine = VideoEngine()
         self.model = None 
         self.current_frame_img = None 
-        self.current_video_path = ""
         self.is_playing = False
         
         self.timer = QTimer()
@@ -48,6 +58,24 @@ class JudoAppQt(QMainWindow):
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         
+        # --- MODE SWITCHER ---
+        mode_layout = QHBoxLayout()
+        self.mode_group = QButtonGroup(self)
+        self.rb_pose = QRadioButton("Mode: Pose Estimation")
+        self.rb_detect = QRadioButton("Mode: Object Detection")
+        self.rb_pose.setChecked(True)
+        self.mode_group.addButton(self.rb_pose)
+        self.mode_group.addButton(self.rb_detect)
+        
+        self.rb_pose.toggled.connect(self.on_mode_change)
+        
+        mode_layout.addWidget(QLabel("<b>APP MODE:</b>"))
+        mode_layout.addWidget(self.rb_pose)
+        mode_layout.addWidget(self.rb_detect)
+        mode_layout.addStretch()
+        left_layout.addLayout(mode_layout)
+
+        # Annotator
         self.annotator = AnnotationWidget()
         left_layout.addWidget(self.annotator, stretch=1)
 
@@ -69,9 +97,9 @@ class JudoAppQt(QMainWindow):
         file_layout = QHBoxLayout()
         self.btn_load = QPushButton("1. Import Video")
         self.btn_load.clicked.connect(self.load_video)
-        self.btn_load_model = QPushButton("2. Load YOLO")
+        self.btn_load_model = QPushButton("2. Load YOLO (Pose)") # Default text
         self.btn_load_model.clicked.connect(self.load_yolo)
-        self.chk_auto = QCheckBox("Auto-Guess New Frames")
+        self.chk_auto = QCheckBox("Auto-Guess")
         self.chk_auto.setChecked(True)
         self.btn_save = QPushButton("💾 Save Pair")
         self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
@@ -106,23 +134,25 @@ class JudoAppQt(QMainWindow):
         """)
         right_layout = QVBoxLayout(right_panel)
 
-        # NEW BUTTON: ADD PERSON
-        self.btn_add_person = QPushButton("+ Add Person")
-        self.btn_add_person.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 5px;")
-        self.btn_add_person.clicked.connect(self.manual_add_person)
-        right_layout.addWidget(self.btn_add_person)
-        # --- [NEW] FOCUS MODE CHECKBOX ---
+        # DYNAMIC BUTTON (Add Person / Add Object)
+        self.btn_add_item = QPushButton("+ Add Person")
+        self.btn_add_item.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 5px;")
+        self.btn_add_item.clicked.connect(self.manual_add_item)
+        right_layout.addWidget(self.btn_add_item)
+        
+        # Focus Mode
         self.chk_focus = QCheckBox("Focus Selected (F)")
         self.chk_focus.setStyleSheet("font-weight: bold; padding: 5px; color: black;")
         self.chk_focus.toggled.connect(self.toggle_focus)
         right_layout.addWidget(self.chk_focus)
-        # ----------------------------------
+
         self.chk_show_nums = QCheckBox("Show Keypoint #")
         self.chk_show_nums.setStyleSheet("font-weight: bold; padding: 5px; color: black;")
         self.chk_show_nums.toggled.connect(self.toggle_numbers)
         right_layout.addWidget(self.chk_show_nums)
         
-        legend_group = QGroupBox("Keypoint Legend")
+        # Legend (Only relevant for Pose)
+        self.legend_group = QGroupBox("Keypoint Legend")
         legend_layout = QVBoxLayout()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -137,8 +167,8 @@ class JudoAppQt(QMainWindow):
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)
         legend_layout.addWidget(scroll)
-        legend_group.setLayout(legend_layout)
-        right_layout.addWidget(legend_group)
+        self.legend_group.setLayout(legend_layout)
+        right_layout.addWidget(self.legend_group)
         
         instr = QLabel("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n(Green=Vis, Red=Occ)")
         instr.setStyleSheet("color: black; font-size: 10px; font-weight: bold;")
@@ -147,68 +177,154 @@ class JudoAppQt(QMainWindow):
         main_layout.addWidget(right_panel, stretch=1)
         self.slider_is_being_dragged = False
 
+        # Init directories
+        self.update_directories()
+        
+        # Ensure "person" is class 0 if file doesn't exist
+        if not os.path.exists(self.classes_file_path):
+            with open(self.classes_file_path, 'w') as f:
+                f.write("person\n")
+
+    # --- CLASSES MANAGEMENT ---
+    def get_class_id(self, label_name):
+        """
+        Reads classes.txt to find the ID for a label.
+        If the label doesn't exist, appends it and returns the new ID.
+        """
+        existing_classes = []
+        if os.path.exists(self.classes_file_path):
+            with open(self.classes_file_path, 'r') as f:
+                existing_classes = [line.strip() for line in f.readlines() if line.strip()]
+        
+        if label_name in existing_classes:
+            return existing_classes.index(label_name)
+        else:
+            # Append new class
+            with open(self.classes_file_path, 'a') as f:
+                f.write(f"{label_name}\n")
+            return len(existing_classes)
+
+    def get_class_name(self, class_id):
+        """Retrives label name from ID for display purposes"""
+        if os.path.exists(self.classes_file_path):
+            with open(self.classes_file_path, 'r') as f:
+                existing_classes = [line.strip() for line in f.readlines() if line.strip()]
+            if 0 <= class_id < len(existing_classes):
+                return existing_classes[class_id]
+        return f"Obj {class_id}"
+
+    # --- MODE & UI LOGIC ---
+    def on_mode_change(self):
+        if self.rb_pose.isChecked():
+            self.app_mode = "pose"
+            self.btn_add_item.setText("+ Add Person")
+            self.btn_load_model.setText("2. Load YOLO (Pose)")
+            self.legend_group.show()
+            self.chk_show_nums.show()
+        else:
+            self.app_mode = "detect"
+            self.btn_add_item.setText("+ Add Object")
+            self.btn_load_model.setText("2. Load YOLO (Detect)")
+            self.legend_group.hide()
+            self.chk_show_nums.hide()
+        
+        self.model = None
+        self.btn_load_model.setStyleSheet("") 
+        self.update_directories()
+        self.seek_frame(self.engine.current_frame_index)
+
+    def update_directories(self):
+        if not self.current_video_name:
+            return
+        video_root = os.path.join(self.project_root, self.current_video_name)
+        
+        if self.app_mode == "pose":
+            mode_root = os.path.join(video_root, "pose")
+        else:
+            mode_root = os.path.join(video_root, "detect")
+            
+        self.active_images_dir = os.path.join(mode_root, "images")
+        self.active_labels_dir = os.path.join(mode_root, "labels")
+        
+        os.makedirs(self.active_images_dir, exist_ok=True)
+        os.makedirs(self.active_labels_dir, exist_ok=True)
+        
+        self.lbl_status.setText(f"Active Mode: {self.app_mode.upper()} | Folder: .../{self.current_video_name}/{self.app_mode}/")
+
     def toggle_numbers(self, checked):
         self.annotator.show_numbers = checked
         self.annotator.update()
 
-    # --- NEW: Manual Add Person Logic ---
-    def manual_add_person(self):
-        # Create a default "Standing Pose" in the center of the screen
-        # Coordinates are Normalized (0.0 to 1.0)
-        
-        # Center X, Y
+    def toggle_focus(self, checked):
+        self.annotator.focus_mode = checked
+        self.annotator.update()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_F:
+            self.chk_focus.setChecked(not self.chk_focus.isChecked())
+        else:
+            super().keyPressEvent(event)
+
+    def manual_add_item(self):
         cx, cy = 0.5, 0.5 
         
-        # Offsets for a simple stick figure
-        head_y = cy - 0.3
-        shoulder_y = cy - 0.2
-        hip_y = cy + 0.05
-        knee_y = cy + 0.2
-        ankle_y = cy + 0.35
+        if self.app_mode == "pose":
+            # --- POSE LOGIC ---
+            # Automatically assign 'person' (ID 0)
+            class_id = self.get_class_id("person")
+            
+            head_y = cy - 0.3
+            shoulder_y = cy - 0.2
+            hip_y = cy + 0.05
+            knee_y = cy + 0.2
+            ankle_y = cy + 0.35
+            width = 0.05 
+            
+            new_kpts = [
+                [cx, head_y, 2],          # 0 Nose
+                [cx+0.01, head_y-0.01, 2], # 1 LEye
+                [cx-0.01, head_y-0.01, 2], # 2 REye
+                [cx+0.02, head_y, 2],     # 3 LEar
+                [cx-0.02, head_y, 2],     # 4 REar
+                [cx+width, shoulder_y, 2], # 5 LShoulder
+                [cx-width, shoulder_y, 2], # 6 RShoulder
+                [cx+width+0.05, shoulder_y+0.1, 2], # 7 LElbow
+                [cx-width-0.05, shoulder_y+0.1, 2], # 8 RElbow
+                [cx+width+0.05, shoulder_y+0.2, 2], # 9 LWrist
+                [cx-width-0.05, shoulder_y+0.2, 2], # 10 RWrist
+                [cx+width, hip_y, 2],     # 11 LHip
+                [cx-width, hip_y, 2],     # 12 RHip
+                [cx+width, knee_y, 2],    # 13 LKnee
+                [cx-width, knee_y, 2],    # 14 RKnee
+                [cx+width, ankle_y, 2],   # 15 LAnkle
+                [cx-width, ankle_y, 2],   # 16 RAnkle
+            ]
+            
+            new_item = {
+                'type': 'person',
+                'class_id': class_id,
+                'bbox': [0.5, 0.5, 0.3, 0.8], 
+                'keypoints': new_kpts
+            }
         
-        width = 0.05 # Half-width for arms/legs
-        
-        # 17 Keypoints (x, y, visibility=2)
-        # 0:Nose, 1:LEye, 2:REye, 3:LEar, 4:REar
-        # 5:LSh, 6:RSh, 7:LElb, 8:RElb, 9:LWri, 10:RWri
-        # 11:LHip, 12:RHip, 13:LKnee, 14:RKnee, 15:LAnk, 16:RAnk
-        
-        new_kpts = [
-            [cx, head_y, 2],          # 0 Nose
-            [cx+0.01, head_y-0.01, 2], # 1 LEye
-            [cx-0.01, head_y-0.01, 2], # 2 REye
-            [cx+0.02, head_y, 2],     # 3 LEar
-            [cx-0.02, head_y, 2],     # 4 REar
+        else:
+            # --- DETECT LOGIC ---
+            text, ok = QInputDialog.getText(self, "Add Object", "Enter Label Name (e.g. chair, ball):")
+            if not ok or not text: return
             
-            [cx+width, shoulder_y, 2], # 5 LShoulder
-            [cx-width, shoulder_y, 2], # 6 RShoulder
+            # Retrieve or Create the Class ID in classes.txt
+            class_id = self.get_class_id(text.lower().strip())
             
-            [cx+width+0.05, shoulder_y+0.1, 2], # 7 LElbow
-            [cx-width-0.05, shoulder_y+0.1, 2], # 8 RElbow
-            
-            [cx+width+0.05, shoulder_y+0.2, 2], # 9 LWrist
-            [cx-width-0.05, shoulder_y+0.2, 2], # 10 RWrist
-            
-            [cx+width, hip_y, 2],     # 11 LHip
-            [cx-width, hip_y, 2],     # 12 RHip
-            
-            [cx+width, knee_y, 2],    # 13 LKnee
-            [cx-width, knee_y, 2],    # 14 RKnee
-            
-            [cx+width, ankle_y, 2],   # 15 LAnkle
-            [cx-width, ankle_y, 2],   # 16 RAnkle
-        ]
-        
-        # Default Bbox (Center)
-        new_person = {
-            'bbox': [0.5, 0.5, 0.3, 0.8], 
-            'keypoints': new_kpts
-        }
-        
-        self.annotator.annotations.append(new_person)
+            new_item = {
+                'type': 'object',
+                'label': text.lower().strip(),
+                'class_id': class_id,
+                'bbox': [0.5, 0.5, 0.2, 0.2],
+                'keypoints': None
+            }
+
+        self.annotator.annotations.append(new_item)
         self.annotator.update()
-        
-        # Reset Save button color since we modified data
         self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
 
     def load_video(self):
@@ -228,36 +344,26 @@ class JudoAppQt(QMainWindow):
 
             self.current_video_path = destination_path
             count = self.engine.load_video(self.current_video_path)
-            
             self.current_video_name = os.path.splitext(filename)[0]
-            video_dataset_root = os.path.join(self.project_root, self.current_video_name)
-            self.current_images_dir = os.path.join(video_dataset_root, "images")
-            self.current_labels_dir = os.path.join(video_dataset_root, "labels")
             
-            os.makedirs(self.current_images_dir, exist_ok=True)
-            os.makedirs(self.current_labels_dir, exist_ok=True)
+            self.update_directories()
             
             self.slider.setRange(0, count - 1)
             self.slider.setValue(0)
             self.seek_frame(0)
-            self.lbl_status.setText(f"Loaded: {filename} | Data Folder: /{self.current_video_name}")
 
     def load_yolo(self):
-        """
-        Attempts to load the TensorRT engine first. 
-        If hardware (GPU) or software (TensorRT/Export libs) fails, 
-        gracefully falls back to the CPU model.
-        """
-        ENGINE_PATH = 'yolo11x-pose.engine'
-        CPU_MODEL_PATH = 'best.pt' # Your CPU/Nano model path
-        GPU_SOURCE_PT = 'yolo11x-pose.pt' # Source for export
-        
-        self.lbl_status.setText("Checking YOLO model status...")
+        if self.app_mode == "pose":
+            ENGINE_PATH = 'Models/best.engine'
+            PT_PATH = 'Models/best.pt' 
+        else:
+            ENGINE_PATH = 'Models/yolo11x.engine'
+            PT_PATH = 'Models/yolo26n.pt'
+
+        self.lbl_status.setText(f"Checking {self.app_mode.upper()} model status...")
         QApplication.processEvents()
 
         model_loaded = False
-
-        # --- 1. Attempt GPU/TensorRT Load ---
         if torch.cuda.is_available():
             try:
                 if os.path.exists(ENGINE_PATH):
@@ -266,40 +372,33 @@ class JudoAppQt(QMainWindow):
                     self.model = YOLO(ENGINE_PATH)
                     model_loaded = True
                 else:
-                    print("GPU Detected! Checking export capability...")
+                    print(f"GPU Detected! Checking export capability for {self.app_mode}...")
                     self.lbl_status.setText("GPU Detected! Attempting TensorRT Export...")
                     QApplication.processEvents()
-                    
-                    # Attempt export - this will raise an exception if TensorRT libs are missing
-                    model = YOLO(GPU_SOURCE_PT)
+                    model = YOLO(PT_PATH) 
                     model.export(format='engine', half=True)
-                    
                     self.lbl_status.setText("Export Complete! Loading Engine...")
                     QApplication.processEvents()
                     self.model = YOLO(ENGINE_PATH)
                     model_loaded = True
-                    
             except Exception as e:
-                # This catches missing TensorRT, OOM errors, or export failures
                 print(f"Warning: GPU acceleration failed. Error: {e}")
-                self.lbl_status.setText(f"GPU Error: {e}. Switching to CPU...")
+                self.lbl_status.setText(f"GPU Error. Switching to CPU...")
                 QApplication.processEvents()
-                model_loaded = False # Trigger fallback
+                model_loaded = False 
         
-        # --- 2. Fallback to CPU ---
         if not model_loaded:
             try:
-                print('Falling back to CPU model...')
-                self.lbl_status.setText(f"Loading CPU Model ({os.path.basename(CPU_MODEL_PATH)})...")
+                print(f'Falling back to CPU model ({PT_PATH})...')
+                self.lbl_status.setText(f"Loading CPU Model ({PT_PATH})...")
                 QApplication.processEvents()
-                self.model = YOLO(CPU_MODEL_PATH)
+                self.model = YOLO(PT_PATH)
                 model_loaded = True
             except Exception as e:
                 QMessageBox.critical(self, "Model Error", f"Critical: Could not load CPU model: {e}")
                 self.lbl_status.setText("Error loading model.")
                 return
 
-        # Final Success State
         if model_loaded:
             self.lbl_status.setText(f"YOLO Model Loaded: {self.model.model_name}")
             print(f'Loaded Model: {self.model.model_name}')
@@ -358,16 +457,15 @@ class JudoAppQt(QMainWindow):
         if img is not None:
             self.current_frame_img = img
             self.annotator.set_image(img)
-            
-            self.annotator.selected_person_idx = -1
+            self.annotator.selected_idx = -1
             self.annotator.selected_kpt_idx = -1
             
             if self.try_load_existing_labels(idx):
-                self.lbl_status.setText(f"Frame {idx}: Loaded Saved Labels ✅")
+                self.lbl_status.setText(f"Frame {idx}: Loaded Saved ({self.app_mode}) ✅")
                 self.btn_save.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
             elif self.chk_auto.isChecked() and self.model:
                 self.run_inference(img)
-                self.lbl_status.setText(f"Frame {idx}: Auto-Guessed 🤖")
+                self.lbl_status.setText(f"Frame {idx}: Auto-Guessed ({self.app_mode}) 🤖")
                 self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
             else:
                 self.annotator.annotations = [] 
@@ -376,9 +474,9 @@ class JudoAppQt(QMainWindow):
                 self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
 
     def try_load_existing_labels(self, idx):
-        if not self.current_labels_dir: return False
+        if not self.active_labels_dir: return False
         filename = f"{self.current_video_name}_{idx:06d}.txt"
-        path = os.path.join(self.current_labels_dir, filename)
+        path = os.path.join(self.active_labels_dir, filename)
         if not os.path.exists(path): return False
         
         new_annotations = []
@@ -387,18 +485,41 @@ class JudoAppQt(QMainWindow):
                 lines = f.readlines()
                 for line in lines:
                     parts = list(map(float, line.strip().split()))
+                    class_id = int(parts[0])
                     bbox = parts[1:5]
-                    raw_kpts = parts[5:]
-                    formatted_kpts = []
-                    for i in range(0, len(raw_kpts), 3):
-                        x = raw_kpts[i]
-                        y = raw_kpts[i+1]
-                        v = int(raw_kpts[i+2])
-                        formatted_kpts.append([x, y, v])
-                    new_annotations.append({'bbox': bbox, 'keypoints': formatted_kpts})
-            self.annotator.annotations = new_annotations
-            self.annotator.update()
-            return True
+                    
+                    if len(parts) > 5:
+                        # POSE DATA
+                        if self.app_mode != "pose": continue 
+                        raw_kpts = parts[5:]
+                        formatted_kpts = []
+                        for i in range(0, len(raw_kpts), 3):
+                            x = raw_kpts[i]
+                            y = raw_kpts[i+1]
+                            v = int(raw_kpts[i+2])
+                            formatted_kpts.append([x, y, v])
+                        new_annotations.append({
+                            'type': 'person', 'class_id': class_id, 
+                            'bbox': bbox, 'keypoints': formatted_kpts
+                        })
+                    else:
+                        # DETECT DATA
+                        if self.app_mode != "detect": continue
+                        
+                        # Lookup name from ID
+                        label_name = self.get_class_name(class_id)
+                        
+                        new_annotations.append({
+                            'type': 'object', 'label': label_name, 'class_id': class_id,
+                            'bbox': bbox, 'keypoints': None
+                        })
+            
+            if new_annotations:
+                self.annotator.annotations = new_annotations
+                self.annotator.update()
+                return True
+            return False
+            
         except Exception:
             return False
 
@@ -406,7 +527,10 @@ class JudoAppQt(QMainWindow):
         if not self.model: return
         results = self.model(img, verbose=False)
         self.annotator.annotations = []
-        if results and results[0].keypoints is not None:
+        
+        if not results: return
+
+        if self.app_mode == "pose" and results[0].keypoints is not None:
             keypoints_data = results[0].keypoints.xyn.cpu().numpy()
             boxes = results[0].boxes.xywhn.cpu().numpy() 
             for i, kpts in enumerate(keypoints_data):
@@ -416,31 +540,52 @@ class JudoAppQt(QMainWindow):
                     vis = 0 if (x==0 and y==0) else 2 
                     formatted_kpts.append([float(x), float(y), vis])
                 bbox = boxes[i].tolist() if i < len(boxes) else [0,0,0,0]
-                self.annotator.annotations.append({'bbox': bbox, 'keypoints': formatted_kpts})
+                self.annotator.annotations.append({
+                    'type': 'person', 'class_id': 0,
+                    'bbox': bbox, 'keypoints': formatted_kpts
+                })
+        
+        elif self.app_mode == "detect" and results[0].boxes is not None:
+            boxes = results[0].boxes.xywhn.cpu().numpy()
+            classes = results[0].boxes.cls.cpu().numpy()
+            for i, box in enumerate(boxes):
+                cls = int(classes[i])
+                label_name = results[0].names[cls]
+                
+                # Auto-register this class ID if it doesn't align with our classes.txt?
+                # For now, we trust the model's output name.
+                
+                self.annotator.annotations.append({
+                    'type': 'object', 'label': label_name, 'class_id': cls,
+                    'bbox': box.tolist(), 'keypoints': None
+                })
+                
         self.annotator.update()
 
     def save_pair(self):
-        if not self.current_images_dir or not self.current_labels_dir: 
-            QMessageBox.warning(self, "Error", "No video folder active.")
+        if not self.active_images_dir or not self.active_labels_dir: 
+            QMessageBox.warning(self, "Error", "No valid folder for current mode.")
             return
         if self.current_frame_img is None: return
 
         base_filename = f"{self.current_video_name}_{self.engine.current_frame_index:06d}"
+        txt_path = os.path.join(self.active_labels_dir, f"{base_filename}.txt")
         
-        txt_path = os.path.join(self.current_labels_dir, f"{base_filename}.txt")
         try:
             with open(txt_path, "w") as f:
-                for person in self.annotator.annotations:
-                    line = [0] 
-                    line.extend(person['bbox']) 
-                    for k in person['keypoints']:
-                        line.extend(k)
+                for item in self.annotator.annotations:
+                    line = [item['class_id']]
+                    line.extend(item['bbox'])
+                    if item.get('keypoints'):
+                        for k in item['keypoints']:
+                            line.extend(k)
+                    
                     f.write(" ".join(map(str, line)) + "\n")
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Txt Error: {e}")
             return
 
-        img_path = os.path.join(self.current_images_dir, f"{base_filename}.jpg")
+        img_path = os.path.join(self.active_images_dir, f"{base_filename}.jpg")
         try:
             bgr_img = cv2.cvtColor(self.current_frame_img, cv2.COLOR_RGB2BGR)
             cv2.imwrite(img_path, bgr_img)
@@ -448,20 +593,9 @@ class JudoAppQt(QMainWindow):
             QMessageBox.critical(self, "Save Error", f"Image Error: {e}")
             return
             
-        self.lbl_status.setText(f"Saved to /{self.current_video_name}: {base_filename}")
+        self.lbl_status.setText(f"Saved to .../{self.app_mode}/: {base_filename}")
         self.btn_save.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
-    def toggle_focus(self, checked):
-        """Pass the checkbox state to the annotator widget"""
-        self.annotator.focus_mode = checked
-        self.annotator.update()
 
-    def keyPressEvent(self, event):
-        """Shortcut to toggle focus mode with 'F' key"""
-        if event.key() == Qt.Key.Key_F:
-            # Toggle the checkbox (which triggers the logic above)
-            self.chk_focus.setChecked(not self.chk_focus.isChecked())
-        else:
-            super().keyPressEvent(event)
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = JudoAppQt()
