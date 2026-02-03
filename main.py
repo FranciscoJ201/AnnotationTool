@@ -249,7 +249,7 @@ class JudoAppQt(QMainWindow):
         gracefully falls back to the CPU model.
         """
         ENGINE_PATH = 'yolo11x-pose.engine'
-        CPU_MODEL_PATH = 'runs/dry_run2/weights/best.pt' # Your CPU/Nano model path
+        CPU_MODEL_PATH = 'best.pt' # Your CPU/Nano model path
         GPU_SOURCE_PT = 'yolo11x-pose.pt' # Source for export
         
         self.lbl_status.setText("Checking YOLO model status...")
