@@ -94,11 +94,20 @@ class JudoAppQt(QMainWindow):
         play_layout.addStretch()
         left_layout.addLayout(play_layout)
 
+        # --- FILE / MODEL CONTROLS ---
         file_layout = QHBoxLayout()
         self.btn_load = QPushButton("1. Import Video")
         self.btn_load.clicked.connect(self.load_video)
-        self.btn_load_model = QPushButton("2. Load YOLO (Pose)") # Default text
-        self.btn_load_model.clicked.connect(self.load_yolo)
+        
+        self.btn_load_model = QPushButton("2a. Load Main Model") # Renamed slightly
+        self.btn_load_model.clicked.connect(self.load_yolo_main)
+
+        # --- NEW COMPARISON BUTTON ---
+        self.btn_load_compare = QPushButton("2b. Load Compare (26n)")
+        self.btn_load_compare.setStyleSheet("background-color: #e0f7fa; color: black;")
+        self.btn_load_compare.clicked.connect(self.load_yolo_compare)
+        # -----------------------------
+
         self.chk_auto = QCheckBox("Auto-Guess")
         self.chk_auto.setChecked(True)
         self.btn_save = QPushButton("💾 Save Pair")
@@ -107,6 +116,7 @@ class JudoAppQt(QMainWindow):
         
         file_layout.addWidget(self.btn_load)
         file_layout.addWidget(self.btn_load_model)
+        file_layout.addWidget(self.btn_load_compare) # Add to layout
         file_layout.addWidget(self.chk_auto)
         file_layout.addStretch()
         file_layout.addWidget(self.btn_save)
@@ -140,12 +150,11 @@ class JudoAppQt(QMainWindow):
         self.btn_add_item.clicked.connect(self.manual_add_item)
         right_layout.addWidget(self.btn_add_item)
 
-        # --- NEW DELETE BUTTON ---
+        # DELETE BUTTON
         self.btn_del_item = QPushButton("🗑 Delete Selected")
         self.btn_del_item.setStyleSheet("background-color: #f44336; color: white; font-weight: bold; padding: 5px;")
         self.btn_del_item.clicked.connect(self.delete_selected_item)
         right_layout.addWidget(self.btn_del_item)
-        # -------------------------
         
         # Focus Mode
         self.chk_focus = QCheckBox("Focus Selected (F)")
@@ -194,10 +203,6 @@ class JudoAppQt(QMainWindow):
 
     # --- CLASSES MANAGEMENT ---
     def get_class_id(self, label_name):
-        """
-        Reads classes.txt to find the ID for a label.
-        If the label doesn't exist, appends it and returns the new ID.
-        """
         existing_classes = []
         if os.path.exists(self.classes_file_path):
             with open(self.classes_file_path, 'r') as f:
@@ -206,13 +211,11 @@ class JudoAppQt(QMainWindow):
         if label_name in existing_classes:
             return existing_classes.index(label_name)
         else:
-            # Append new class
             with open(self.classes_file_path, 'a') as f:
                 f.write(f"{label_name}\n")
             return len(existing_classes)
 
     def get_class_name(self, class_id):
-        """Retrives label name from ID for display purposes"""
         if os.path.exists(self.classes_file_path):
             with open(self.classes_file_path, 'r') as f:
                 existing_classes = [line.strip() for line in f.readlines() if line.strip()]
@@ -225,18 +228,21 @@ class JudoAppQt(QMainWindow):
         if self.rb_pose.isChecked():
             self.app_mode = "pose"
             self.btn_add_item.setText("+ Add Person")
-            self.btn_load_model.setText("2. Load YOLO (Pose)")
+            self.btn_load_model.setText("2a. Load Main (Pose)")
             self.legend_group.show()
             self.chk_show_nums.show()
+            self.btn_load_compare.show() # Show compare button in pose mode
         else:
             self.app_mode = "detect"
             self.btn_add_item.setText("+ Add Object")
-            self.btn_load_model.setText("2. Load YOLO (Detect)")
+            self.btn_load_model.setText("2a. Load Main (Detect)")
             self.legend_group.hide()
             self.chk_show_nums.hide()
+            self.btn_load_compare.hide() # Hide compare button in detect mode
         
         self.model = None
         self.btn_load_model.setStyleSheet("") 
+        self.btn_load_compare.setStyleSheet("background-color: #e0f7fa; color: black;")
         self.update_directories()
         self.seek_frame(self.engine.current_frame_index)
 
@@ -270,22 +276,16 @@ class JudoAppQt(QMainWindow):
         if event.key() == Qt.Key.Key_F:
             self.chk_focus.setChecked(not self.chk_focus.isChecked())
         elif event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
-            # Support Keyboard Deletion
             self.delete_selected_item()
         else:
             super().keyPressEvent(event)
 
     def delete_selected_item(self):
-        """Removes the currently selected item from annotations."""
         idx = self.annotator.selected_idx
         if idx != -1 and idx < len(self.annotator.annotations):
             del self.annotator.annotations[idx]
-            
-            # Reset Selection
             self.annotator.selected_idx = -1
             self.annotator.selected_kpt_idx = -1
-            
-            # Update UI
             self.annotator.update()
             self.lbl_status.setText(f"Deleted item at index {idx}.")
             self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
@@ -296,10 +296,7 @@ class JudoAppQt(QMainWindow):
         cx, cy = 0.5, 0.5 
         
         if self.app_mode == "pose":
-            # --- POSE LOGIC ---
-            # Automatically assign 'person' (ID 0)
             class_id = self.get_class_id("person")
-            
             head_y = cy - 0.3
             shoulder_y = cy - 0.2
             hip_y = cy + 0.05
@@ -328,26 +325,16 @@ class JudoAppQt(QMainWindow):
             ]
             
             new_item = {
-                'type': 'person',
-                'class_id': class_id,
-                'bbox': [0.5, 0.5, 0.3, 0.8], 
-                'keypoints': new_kpts
+                'type': 'person', 'class_id': class_id,
+                'bbox': [0.5, 0.5, 0.3, 0.8], 'keypoints': new_kpts
             }
-        
         else:
-            # --- DETECT LOGIC ---
             text, ok = QInputDialog.getText(self, "Add Object", "Enter Label Name (e.g. chair, ball):")
             if not ok or not text: return
-            
-            # Retrieve or Create the Class ID in classes.txt
             class_id = self.get_class_id(text.lower().strip())
-            
             new_item = {
-                'type': 'object',
-                'label': text.lower().strip(),
-                'class_id': class_id,
-                'bbox': [0.5, 0.5, 0.2, 0.2],
-                'keypoints': None
+                'type': 'object', 'label': text.lower().strip(), 'class_id': class_id,
+                'bbox': [0.5, 0.5, 0.2, 0.2], 'keypoints': None
             }
 
         self.annotator.annotations.append(new_item)
@@ -372,64 +359,102 @@ class JudoAppQt(QMainWindow):
             self.current_video_path = destination_path
             count = self.engine.load_video(self.current_video_path)
             self.current_video_name = os.path.splitext(filename)[0]
-            
             self.update_directories()
-            
             self.slider.setRange(0, count - 1)
             self.slider.setValue(0)
             self.seek_frame(0)
 
-    def load_yolo(self):
+    # --- MODEL LOADING LOGIC ---
+    def load_yolo_main(self):
+        """Loads the default main model depending on current mode."""
         if self.app_mode == "pose":
-            ENGINE_PATH = 'Models/best.engine'
-            PT_PATH = 'Models/best.pt' 
+            engine = 'Models/medbest.engine'
+            pt = 'Models/medbest.pt'
         else:
-            ENGINE_PATH = 'Models/yolo11x.engine'
-            PT_PATH = 'Models/yolo26n.pt'
+            engine = 'Models/yolo11x.engine'
+            pt = 'Models/yolo26n.pt'
+        
+        self._load_model_generic(engine, pt)
 
-        self.lbl_status.setText(f"Checking {self.app_mode.upper()} model status...")
+    def load_yolo_compare(self):
+        """Forces app to Pose mode and loads the comparison model."""
+        # Force Pose Mode if not active
+        if not self.rb_pose.isChecked():
+            self.rb_pose.setChecked(True)
+            self.on_mode_change()
+
+        # Define paths for the comparison model
+        # Assuming you name it yolo26n-pose.pt / .engine
+        engine = 'Models/yolo26n-pose.engine'
+        pt = 'Models/yolo26n-pose.pt'
+
+        self._load_model_generic(engine, pt)
+
+    def _load_model_generic(self, engine_path, pt_path):
+        """Reusable helper to load any YOLO model."""
+        self.lbl_status.setText(f"Loading Model: {pt_path} ...")
         QApplication.processEvents()
 
         model_loaded = False
+        
+        # 1. Try GPU (TensorRT Engine)
         if torch.cuda.is_available():
             try:
-                if os.path.exists(ENGINE_PATH):
-                    self.lbl_status.setText(f"Loading cached Engine: {ENGINE_PATH}")
+                if os.path.exists(engine_path):
+                    self.lbl_status.setText(f"Loading Engine: {engine_path}")
                     QApplication.processEvents()
-                    self.model = YOLO(ENGINE_PATH)
+                    self.model = YOLO(engine_path)
                     model_loaded = True
                 else:
-                    print(f"GPU Detected! Checking export capability for {self.app_mode}...")
-                    self.lbl_status.setText("GPU Detected! Attempting TensorRT Export...")
+                    print(f"GPU Detected! Checking export capability...")
+                    self.lbl_status.setText(f"Exporting to Engine ({engine_path})...")
                     QApplication.processEvents()
-                    model = YOLO(PT_PATH) 
-                    model.export(format='engine', half=True)
-                    self.lbl_status.setText("Export Complete! Loading Engine...")
-                    QApplication.processEvents()
-                    self.model = YOLO(ENGINE_PATH)
-                    model_loaded = True
+                    
+                    if os.path.exists(pt_path):
+                        model = YOLO(pt_path) 
+                        model.export(format='engine', half=True)
+                        self.lbl_status.setText("Export Complete! Loading...")
+                        QApplication.processEvents()
+                        self.model = YOLO(engine_path)
+                        model_loaded = True
+                    else:
+                        print(f"Missing source PT file: {pt_path}")
             except Exception as e:
-                print(f"Warning: GPU acceleration failed. Error: {e}")
+                print(f"Warning: GPU acceleration/export failed. Error: {e}")
                 self.lbl_status.setText(f"GPU Error. Switching to CPU...")
                 QApplication.processEvents()
                 model_loaded = False 
         
+        # 2. Try CPU (PT File)
         if not model_loaded:
             try:
-                print(f'Falling back to CPU model ({PT_PATH})...')
-                self.lbl_status.setText(f"Loading CPU Model ({PT_PATH})...")
-                QApplication.processEvents()
-                self.model = YOLO(PT_PATH)
-                model_loaded = True
+                if os.path.exists(pt_path):
+                    print(f'Loading CPU model ({pt_path})...')
+                    self.lbl_status.setText(f"Loading CPU Model ({pt_path})...")
+                    QApplication.processEvents()
+                    self.model = YOLO(pt_path)
+                    model_loaded = True
+                else:
+                    QMessageBox.critical(self, "Model Error", f"Could not find model file:\n{pt_path}")
+                    self.lbl_status.setText("Error loading model.")
+                    return
             except Exception as e:
                 QMessageBox.critical(self, "Model Error", f"Critical: Could not load CPU model: {e}")
                 self.lbl_status.setText("Error loading model.")
                 return
 
         if model_loaded:
-            self.lbl_status.setText(f"YOLO Model Loaded: {self.model.model_name}")
+            self.lbl_status.setText(f"Loaded: {self.model.model_name}")
             print(f'Loaded Model: {self.model.model_name}')
-            self.btn_load_model.setStyleSheet("background-color: #d4edda")
+            
+            # Visual feedback: Turn active button green, others neutral
+            # Note: This simple check assumes specific button usage
+            if pt_path == 'Models/best.pt' or pt_path == 'Models/yolo26n.pt':
+                 self.btn_load_model.setStyleSheet("background-color: #d4edda")
+                 self.btn_load_compare.setStyleSheet("background-color: #e0f7fa")
+            else:
+                 self.btn_load_compare.setStyleSheet("background-color: #d4edda")
+                 self.btn_load_model.setStyleSheet("")
 
     def toggle_play(self):
         self.is_playing = not self.is_playing
@@ -516,7 +541,6 @@ class JudoAppQt(QMainWindow):
                     bbox = parts[1:5]
                     
                     if len(parts) > 5:
-                        # POSE DATA
                         if self.app_mode != "pose": continue 
                         raw_kpts = parts[5:]
                         formatted_kpts = []
@@ -530,12 +554,8 @@ class JudoAppQt(QMainWindow):
                             'bbox': bbox, 'keypoints': formatted_kpts
                         })
                     else:
-                        # DETECT DATA
                         if self.app_mode != "detect": continue
-                        
-                        # Lookup name from ID
                         label_name = self.get_class_name(class_id)
-                        
                         new_annotations.append({
                             'type': 'object', 'label': label_name, 'class_id': class_id,
                             'bbox': bbox, 'keypoints': None
@@ -578,10 +598,6 @@ class JudoAppQt(QMainWindow):
             for i, box in enumerate(boxes):
                 cls = int(classes[i])
                 label_name = results[0].names[cls]
-                
-                # Auto-register this class ID if it doesn't align with our classes.txt?
-                # For now, we trust the model's output name.
-                
                 self.annotator.annotations.append({
                     'type': 'object', 'label': label_name, 'class_id': cls,
                     'bbox': box.tolist(), 'keypoints': None
