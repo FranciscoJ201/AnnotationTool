@@ -1,80 +1,84 @@
-# Judo Pose Annotation Tool (YOLOv11)
+# Judo Annotation Suite (YOLOv11 / YOLO26)
 
-A custom Python GUI for creating and refining Pose Estimation datasets. This tool allows you to load raw videos, use a pre-trained YOLO model to "auto-guess" poses, and manually fine-tune keypoints and bounding boxes for high-accuracy Judo datasets.
+A professional-grade Python GUI for creating and refining **Pose Estimation** and **Object Detection** datasets. This tool allows you to load raw videos, use pre-trained YOLO models to "auto-guess" annotations, and manually fine-tune keypoints and bounding boxes for high-accuracy Judo datasets.
 
 ## 🚀 Features
 
-* **Video Navigation:** Frame-by-frame stepping or slider seeking.
-* **Auto-Labeling:** Integration with YOLOv11 to generate initial keypoint guesses.
+* **Dual Mode System:**
+    * **Pose Mode:** Annotate 17-keypoint skeletons for Judo throws.
+    * **Detect Mode:** Annotate standard bounding boxes for mats, referees, or equipment.
+* **Smart Auto-Labeling:**
+    * **Main Model:** Auto-annotate using your best model (e.g., `medbest.pt`).
+    * **Comparison Mode:** Overlay predictions from a base model (e.g., `yolo26n`) to compare performance against your fine-tuned weights.
+* **Cloud-Ready Workflow:** Fully compatible with Google Drive synchronization via `.env` configuration.
 * **Manual Correction:**
-    * **Drag Keypoints:** Fine-tune joint positions.
+    * **Drag Keypoints:** Fine-tune joint positions with pixel-perfect accuracy.
     * **Drag Bounding Boxes:** Manually resize boxes using corner handles.
-    * **Add Person:** Insert a default skeleton for missed detections.
-* **Visibility Toggling:** Right-click to cycle keypoint status (Visible 🟢, Occluded 🔴, Hidden ⚫).
+    * **Visibility Toggling:** Right-click to cycle keypoint status (Visible 🟢, Occluded 🔴, Hidden ⚫).
 * **YOLO Format:** Saves labels directly in the standard `.txt` format required for training.
 
 ## 🛠️ Installation
 
 1.  **Clone or Download** this repository.
 2.  **Install Dependencies:**
-    Ensure you have Python 3.8+ installed.
-
     ```bash
-    pip install opencv-python PyQt6 ultralytics torch numpy
+    pip install -r requirements.txt
     ```
-
-3.  **Project Structure:**
-    Keep your directory organized like this:
-
-    ```text
-    /project_root
-    ├── main.py              # The App Entry Point
-    ├── annotator.py         # Custom Widget for drawing/dragging
-    ├── video_engine.py      # Video loading logic
-    ├── split_dataset.py     # Utility to prepare data for training
-    ├── judo_dataset/        # (Auto-created) Stores raw images/labels
-    └── datasets/            # (Auto-created) Final training ready data
+3.  **Setup Configuration:**
+    Create a file named `.env` in the root directory (do not commit this file). Add your specific paths:
+    ```ini
+    # .env
+    RAW_DATA_DIR=G:/My Drive/judo_datasetDONTDELETE   # Path to shared Drive folder
+    PROCESSED_DATA_DIR=datasets/judo_pose             # Local path for training data
+    MODEL_TRAIN_BASE=Models/yolo26x-pose.pt           # Base weights for training
+    TRAIN_PROJECT_DIR=Largest                         # Training output folder name
     ```
 
 ## 🎮 Controls
 
 | Action | Control |
 | :--- | :--- |
-| **Select Person** | Click any keypoint on a person. |
+| **Select Item** | Click any keypoint (Pose) or the box edge (Detect). |
 | **Move Keypoint** | Left-Click & Drag a keypoint. |
-| **Resize Bounding Box** | Select person, then Drag the **Yellow Corner Handles**. |
-| **Toggle Visibility** | Right-Click a keypoint (Green -> Red -> Grey). |
-| **Navigation** | Use On-screen buttons or Slider. |
-| **Add Person** | Click `+ Add Person` button (Adds stick figure to center). |
+| **Resize Box** | Select item, then Drag the **Yellow Corner Handles**. |
+| **Toggle Visibility** | Right-Click a keypoint (Green 🟢 -> Red 🔴 -> Grey ⚫). |
+| **Delete Item** | Select item and press `Del` or `Backspace`. |
+| **Focus Mode** | Press `F` to dim background and focus on the selected person. |
+| **Add Item** | Click `+ Add Person` (Pose) or `+ Add Object` (Detect). |
 
-> **Visibility Legend:**
+> **Visibility Legend (Pose Mode):**
 > * 🟢 **Green:** Visible (Clear line of sight).
-> * 🔴 **Red:** Occluded (Joint exists but is covered by cloth/body).
-> * ⚫ **Grey:** Hidden/Not labeled.
+> * 🔴 **Red:** Occluded (Joint exists but is covered by Gi/body - **Crucial for Judo**).
+> * ⚫ **Grey:** Hidden/Not labeled (Off-camera).
 
 ## 📝 Workflow Guide
 
 ### 1. Labeling (The Tool)
-1.  Run the application: `python main.py`
-2.  **Import Video:** Click "Import Video" to load a raw `.mp4` file.
-3.  **Load YOLO:** Click "Load YOLO" to enable auto-guessing (uses `yolo11x-pose` or CPU fallback).
-4.  **Annotate:**
-    * If the model misses, click `+ Add Person`.
-    * If the box is too loose, drag the yellow corners to tighten it.
-    * Right-click hidden joints to mark them as "Occluded" (Red).
-5.  **Save:** Click "Save Pair". This saves the image to `images/` and the coordinates to `labels/`.
+1.  Run the application:
+    ```bash
+    python main.py
+    ```
+2.  **Select Mode:** Choose **Pose Estimation** or **Object Detection** in the top left.
+3.  **Import Video:** Load a raw `.mp4` file.
+4.  **Load Model:**
+    * Click **2a. Load Main** to use your fine-tuned model for auto-guessing.
+    * (Optional) Click **2b. Load Base** to see how the default YOLO model performs.
+5.  **Annotate & Save:** Correct the auto-guesses and click **Save Pair** (Green button).
 
 ### 2. Preparing for Training (The Bridge)
-YOLO cannot train on the raw `judo_dataset` folder directly. You must split it into Train/Val sets.
+YOLO cannot train on the raw `judo_dataset` folder directly. You must split it into Train/Val sets and generate the configuration file.
 
-1.  Open `split_dataset.py`.
-2.  Run it:
+1.  Run the splitter script:
     ```bash
-    python split_dataset.py
+    python datasplitter.py
     ```
-3.  This creates a clean folder at `datasets/judo_pose` with shuffled `train` and `val` subfolders.
+2.  This script will:
+    * Read your `.env` to find the source data.
+    * Shuffle and split data (80% Train / 20% Val).
+    * **Auto-generate** the `judo_pose.yaml` file with the correct absolute paths.
+3.  Your data is now ready in `datasets/judo_pose`.
 
-
-## ⚠️ Important Notes
-* **Bounding Boxes:** The tool saves the bounding box *exactly* as it appears on screen. If you move a hand outside the box, **you must resize the box manually** using the yellow handles, or the training data will be invalid.
-* **Cumulative Training:** When adding new data, always run `split_dataset.py` again and retrain on the **full** dataset (old + new images) to prevent the model from forgetting previous knowledge.
+### 3. Training
+Run the training script (which also reads from your `.env` configuration):
+```bash
+python train_test.py

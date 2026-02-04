@@ -9,8 +9,12 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QRadioButton, QButtonGroup, QInputDialog)
 from PyQt6.QtCore import Qt, QTimer
 from ultralytics import YOLO
+from dotenv import load_dotenv
+load_dotenv()
 
-# Import our custom modules
+
+
+
 from video_engine import VideoEngine
 from annotator import AnnotationWidget, KEYPOINT_NAMES
 
@@ -25,7 +29,8 @@ class JudoAppQt(QMainWindow):
         self.app_mode = "pose" 
 
         # --- PROJECT DIRECTORY SETUP ---
-        self.project_root = os.path.join(os.getcwd(), "judo_datasetDONTDELETE")
+        env_path = os.getenv("RAW_DATA_DIR", "judo_datasetDONTDELETE")
+        self.project_root = os.path.abspath(env_path)
         self.videos_storage_dir = os.path.join(self.project_root, "videos")
         
         # Define the global classes file path

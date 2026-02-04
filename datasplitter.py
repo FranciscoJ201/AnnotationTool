@@ -2,10 +2,15 @@ import os
 import shutil
 import random
 import glob
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- CONFIG ---
-SOURCE_ROOT = "judo_datasetDONTDELETE"  # Your tool's output folder
-DEST_ROOT = "datasets/judo_pose"        # The folder YOLO will actually use
+# Get paths from .env, or use defaults if not found
+SOURCE_ROOT = os.getenv("RAW_DATA_DIR", "judo_datasetDONTDELETE")
+DEST_ROOT = os.getenv("PROCESSED_DATA_DIR", "datasets/judo_pose")
 TRAIN_RATIO = 0.8                       # 80% Training, 20% Validation
 
 def clamp(val):
@@ -38,7 +43,7 @@ def clean_and_copy(src_txt, dst_txt):
         for i in range(0, len(raw_kpts), 3):
             kx = clamp(raw_kpts[i])     # Clamp X
             ky = clamp(raw_kpts[i+1])   # Clamp Y
-            kv = int(raw_kpts[i+2])     # DO NOT CLAMP VISIBILITY (Keep 2 as 2)
+            kv = int(raw_kpts[i+2])     # DO NOT CLAMP VISIBILITY
             cleaned_kpts.extend([kx, ky, kv])
             
         # Reconstruct the line
@@ -48,8 +53,33 @@ def clean_and_copy(src_txt, dst_txt):
     with open(dst_txt, 'w') as f:
         f.write("\n".join(cleaned_lines))
 
+def create_yaml(dest_root):
+    """Generates the YAML file pointing to the correct absolute path"""
+    # Use forward slashes for paths to avoid Windows backslash escape issues in YAML
+    abs_path = os.path.abspath(dest_root).replace('\\', '/')
+    
+    yaml_content = f"""
+path: {abs_path}  # Absolute path to dataset (Auto-Generated)
+train: train/images
+val: val/images
+
+# Keypoints (COCO format)
+kpt_shape: [17, 3]
+flip_idx: [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
+
+# Classes
+names:
+  0: person
+"""
+    # Save the yaml in the current directory so training script finds it easily
+    with open("judo_pose.yaml", "w") as f:
+        f.write(yaml_content.strip())
+    print(f"✅ Generated judo_pose.yaml pointing to: {abs_path}")
+
 def main():
-    print(f"🚀 Starting Data Split from: {SOURCE_ROOT}")
+    print(f"🚀 Starting Data Split...")
+    print(f"   Source: {SOURCE_ROOT}")
+    print(f"   Destination: {DEST_ROOT}")
 
     # 1. Clear old dataset to avoid duplicates
     if os.path.exists(DEST_ROOT):
@@ -68,7 +98,7 @@ def main():
         all_images = glob.glob(os.path.join(SOURCE_ROOT, "*", "images", "*.jpg"))
 
     if not all_images:
-        print("❌ Error: No images found! Check your directory structure.")
+        print("❌ Error: No images found! Check your directory structure or RAW_DATA_DIR.")
         return
 
     print(f"Found {len(all_images)} total images.")
@@ -105,6 +135,9 @@ def main():
             
             # Clean & Copy Label
             clean_and_copy(lbl, os.path.join(DEST_ROOT, name, 'labels', fname.replace('.jpg', '.txt')))
+
+    # 5. GENERATE YAML 
+    create_yaml(DEST_ROOT)
 
     print(f"✅ Ready for training! Data is in: {DEST_ROOT}")
 

@@ -1,6 +1,6 @@
-path: datasets/judo_pose  # Root directory
-train: train/images       # Train folder relative to path
-val: val/images           # Val folder relative to path
+path: /Users/franciscojimenez/Desktop/CustomLabeler/datasets/judo_pose  # Absolute path to dataset (Auto-Generated)
+train: train/images
+val: val/images
 
 # Keypoints (COCO format)
 kpt_shape: [17, 3]

@@ -1,0 +1,15 @@
+# Core Logic & GUI
+opencv-python>=4.8.0
+PyQt6>=6.4.0
+numpy>=1.24.0
+
+# Deep Learning & YOLO
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Environment Management
+python-dotenv>=1.0.0
+
+# Data Splitting & Utilities
+tqdm>=4.65.0  # Optional but good for progress bars

@@ -1,19 +1,22 @@
+import os
+from dotenv import load_dotenv
 from ultralytics import YOLO
+load_dotenv()
 
 if __name__ == '__main__':
-    
-    model = YOLO('yolo26x-pose.pt')
+    model_path = os.getenv("MODEL_TRAIN_BASE", "yolo26x-pose.pt")
+    project_dir = os.getenv("TRAIN_PROJECT_DIR", "Largest")
+    model = YOLO(model_path)
 
-    # 2. Train the model
     results = model.train(
     data='judo_pose.yaml',
-    epochs=150,          # Reduced from 200 because it learns fast
-    patience=20,         # STRICT early stopping. If it doesn't improve for 20 epochs, kill it.
-    batch=16,             # You likely need to lower this further for Large
+    epochs=150,          
+    patience=20,         
+    batch=16,             
     workers=4,
     imgsz=640,
-    dropout=0.1,         # CRITICAL: Keep this to fight the overfitting we saw in Medium
-    augment=True,         # Keep this on
-    project = 'Largest',
+    dropout=0.1,         
+    augment=True,         
+    project = project_dir,
     name = 'yolo26X-pose-judo'
 )
