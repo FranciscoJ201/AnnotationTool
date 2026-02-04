@@ -139,6 +139,13 @@ class JudoAppQt(QMainWindow):
         self.btn_add_item.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 5px;")
         self.btn_add_item.clicked.connect(self.manual_add_item)
         right_layout.addWidget(self.btn_add_item)
+
+        # --- NEW DELETE BUTTON ---
+        self.btn_del_item = QPushButton("🗑 Delete Selected")
+        self.btn_del_item.setStyleSheet("background-color: #f44336; color: white; font-weight: bold; padding: 5px;")
+        self.btn_del_item.clicked.connect(self.delete_selected_item)
+        right_layout.addWidget(self.btn_del_item)
+        # -------------------------
         
         # Focus Mode
         self.chk_focus = QCheckBox("Focus Selected (F)")
@@ -170,7 +177,7 @@ class JudoAppQt(QMainWindow):
         self.legend_group.setLayout(legend_layout)
         right_layout.addWidget(self.legend_group)
         
-        instr = QLabel("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n(Green=Vis, Red=Occ)")
+        instr = QLabel("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n- Del: Delete Item")
         instr.setStyleSheet("color: black; font-size: 10px; font-weight: bold;")
         right_layout.addWidget(instr)
 
@@ -262,8 +269,28 @@ class JudoAppQt(QMainWindow):
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_F:
             self.chk_focus.setChecked(not self.chk_focus.isChecked())
+        elif event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
+            # Support Keyboard Deletion
+            self.delete_selected_item()
         else:
             super().keyPressEvent(event)
+
+    def delete_selected_item(self):
+        """Removes the currently selected item from annotations."""
+        idx = self.annotator.selected_idx
+        if idx != -1 and idx < len(self.annotator.annotations):
+            del self.annotator.annotations[idx]
+            
+            # Reset Selection
+            self.annotator.selected_idx = -1
+            self.annotator.selected_kpt_idx = -1
+            
+            # Update UI
+            self.annotator.update()
+            self.lbl_status.setText(f"Deleted item at index {idx}.")
+            self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        else:
+            QMessageBox.information(self, "Delete", "No item selected. Click a person/object first to select them.")
 
     def manual_add_item(self):
         cx, cy = 0.5, 0.5 
