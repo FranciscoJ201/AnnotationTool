@@ -9,3 +9,4 @@ judo_dataset
 **/*.pyc
 runs
 datasets
+.env

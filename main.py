@@ -69,7 +69,7 @@ class JudoAppQt(QMainWindow):
         
         self.rb_pose.toggled.connect(self.on_mode_change)
         
-        mode_layout.addWidget(QLabel("<b>APP MODE:</b>"))
+        mode_layout.addWidget(QLabel("<b>MODE:</b>"))
         mode_layout.addWidget(self.rb_pose)
         mode_layout.addWidget(self.rb_detect)
         mode_layout.addStretch()
@@ -103,7 +103,7 @@ class JudoAppQt(QMainWindow):
         self.btn_load_model.clicked.connect(self.load_yolo_main)
 
         # --- NEW COMPARISON BUTTON ---
-        self.btn_load_compare = QPushButton("2b. Load Compare (26n)")
+        self.btn_load_compare = QPushButton("2b. Load Base Model to Compare (26n)")
         self.btn_load_compare.setStyleSheet("background-color: #e0f7fa; color: black;")
         self.btn_load_compare.clicked.connect(self.load_yolo_compare)
         # -----------------------------
