@@ -10,7 +10,6 @@ A professional-grade Python GUI for creating and refining **Pose Estimation** an
 * **Smart Auto-Labeling:**
     * **Main Model:** Auto-annotate using your best model (e.g., `medbest.pt`).
     * **Comparison Mode:** Overlay predictions from a base model (e.g., `yolo26n`) to compare performance against your fine-tuned weights.
-* **Cloud-Ready Workflow:** Fully compatible with Google Drive synchronization via `.env` configuration.
 * **Manual Correction:**
     * **Drag Keypoints:** Fine-tune joint positions with pixel-perfect accuracy.
     * **Drag Bounding Boxes:** Manually resize boxes using corner handles.
@@ -28,6 +27,7 @@ A professional-grade Python GUI for creating and refining **Pose Estimation** an
     Create a file named `.env` in the root directory (do not commit this file). Add your specific paths:
     ```ini
     # .env
+    #EXAMPLE PATHS
     RAW_DATA_DIR=G:/My Drive/judo_datasetDONTDELETE   # Path to shared Drive folder
     PROCESSED_DATA_DIR=datasets/judo_pose             # Local path for training data
     MODEL_TRAIN_BASE=Models/yolo26x-pose.pt           # Base weights for training
