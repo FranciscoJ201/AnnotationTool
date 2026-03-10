@@ -373,11 +373,11 @@ class JudoAppQt(QMainWindow):
     def load_yolo_main(self):
         """Loads the default main model depending on current mode."""
         if self.app_mode == "pose":
-            engine = 'Models/medbest.engine'
-            pt = 'Models/medbest.pt'
+            engine = os.getenv("MODEL_MAIN_PATH", "yolo26n-pose.engine")
+            pt = os.getenv("MODEL_NANO_PATH", "yolo26n-pose.pt")
         else:
-            engine = 'Models/yolo11x.engine'
-            pt = 'Models/yolo26n.pt'
+            engine = os.getenv("MAIN_OBJECT_PATH", "yolo26n.engine")
+            pt = os.getenv("NANO_OBJECT_PATH", "yolo26n.pt")
         
         self._load_model_generic(engine, pt)
 
