@@ -3,6 +3,7 @@ import os
 import shutil
 import cv2
 import torch 
+import glob
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, 
                              QCheckBox, QMessageBox, QScrollArea, QFrame, QGroupBox,
@@ -12,21 +13,26 @@ from ultralytics import YOLO
 from dotenv import load_dotenv
 load_dotenv()
 
-
-
-
 from video_engine import VideoEngine
 from annotator import AnnotationWidget, KEYPOINT_NAMES
 
 class JudoAppQt(QMainWindow):
     def __init__(self):
+        """
+        Args:
+            self: The class instance.
+        """
         super().__init__()
         self.setWindowTitle("Judo Annotation Suite")
         self.resize(1300, 800)
 
         # --- STATE MANAGEMENT ---
-        # "pose" or "detect"
+        # "pose", "detect", or "review"
         self.app_mode = "pose" 
+        
+        # --- REVIEW MODE STATE ---
+        self.review_pairs = [] # List of tuples: (image_path, label_path)
+        self.review_index = 0
 
         # --- PROJECT DIRECTORY SETUP ---
         env_path = os.getenv("RAW_DATA_DIR", "judo_datasetDONTDELETE")
@@ -68,15 +74,21 @@ class JudoAppQt(QMainWindow):
         self.mode_group = QButtonGroup(self)
         self.rb_pose = QRadioButton("Mode: Pose Estimation")
         self.rb_detect = QRadioButton("Mode: Object Detection")
+        self.rb_review = QRadioButton("Mode: Review")
+        
         self.rb_pose.setChecked(True)
         self.mode_group.addButton(self.rb_pose)
         self.mode_group.addButton(self.rb_detect)
+        self.mode_group.addButton(self.rb_review)
         
         self.rb_pose.toggled.connect(self.on_mode_change)
+        self.rb_detect.toggled.connect(self.on_mode_change)
+        self.rb_review.toggled.connect(self.on_mode_change)
         
         mode_layout.addWidget(QLabel("<b>MODE:</b>"))
         mode_layout.addWidget(self.rb_pose)
         mode_layout.addWidget(self.rb_detect)
+        mode_layout.addWidget(self.rb_review)
         mode_layout.addStretch()
         left_layout.addLayout(mode_layout)
 
@@ -191,9 +203,10 @@ class JudoAppQt(QMainWindow):
         self.legend_group.setLayout(legend_layout)
         right_layout.addWidget(self.legend_group)
         
-        instr = QLabel("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n- Del: Delete Item")
-        instr.setStyleSheet("color: black; font-size: 10px; font-weight: bold;")
-        right_layout.addWidget(instr)
+        # Dynamic Instructions Label
+        self.instr_label = QLabel("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n- Del: Delete Item")
+        self.instr_label.setStyleSheet("color: black; font-size: 10px; font-weight: bold;")
+        right_layout.addWidget(self.instr_label)
 
         main_layout.addWidget(right_panel, stretch=1)
         self.slider_is_being_dragged = False
@@ -230,26 +243,61 @@ class JudoAppQt(QMainWindow):
 
     # --- MODE & UI LOGIC ---
     def on_mode_change(self):
+        """
+        Args:
+            self: The class instance.
+        """
         if self.rb_pose.isChecked():
             self.app_mode = "pose"
+            self.btn_load.setText("1. Import Video")
             self.btn_add_item.setText("+ Add Person")
             self.btn_load_model.setText("2a. Load Main (Pose)")
             self.legend_group.show()
             self.chk_show_nums.show()
             self.btn_load_compare.show() # Show compare button in pose mode
-        else:
+            self.set_playback_controls_enabled(True)
+            self.instr_label.setText("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n- Del: Delete Item")
+            
+        elif self.rb_detect.isChecked():
             self.app_mode = "detect"
+            self.btn_load.setText("1. Import Video")
             self.btn_add_item.setText("+ Add Object")
             self.btn_load_model.setText("2a. Load Main (Detect)")
             self.legend_group.hide()
             self.chk_show_nums.hide()
             self.btn_load_compare.hide() # Hide compare button in detect mode
+            self.set_playback_controls_enabled(True)
+            self.instr_label.setText("Controls:\n- L-Click: Drag\n- R-Click: Toggle Vis\n- Del: Delete Item")
+            
+        elif self.rb_review.isChecked():
+            self.app_mode = "review"
+            self.btn_load.setText("1. Load Dataset Folder")
+            self.btn_add_item.setText("+ Add Item")
+            self.btn_load_model.setText("N/A")
+            self.legend_group.hide() # Ensure legend is hidden in review mode
+            self.chk_show_nums.hide()
+            self.btn_load_compare.hide()
+            self.set_playback_controls_enabled(False)
+            self.instr_label.setText("Review Mode Controls:\n- S: Save & Next\n- D: Skip\n- A: Prev\n- L-Click: Drag\n- Del: Delete Item")
         
         self.model = None
         self.btn_load_model.setStyleSheet("") 
         self.btn_load_compare.setStyleSheet("background-color: #e0f7fa; color: black;")
         self.update_directories()
-        self.seek_frame(self.engine.current_frame_index)
+        
+        if self.app_mode != "review" and self.engine.total_frames > 0:
+            self.seek_frame(self.engine.current_frame_index)
+
+    def set_playback_controls_enabled(self, enabled):
+        """
+        Args:
+            self: The class instance.
+            enabled (bool): True to enable playback controls, False to disable.
+        """
+        self.btn_play.setEnabled(enabled)
+        self.btn_prev.setEnabled(enabled)
+        self.btn_next.setEnabled(enabled)
+        self.slider.setEnabled(enabled)
 
     def update_directories(self):
         if not self.current_video_name:
@@ -258,8 +306,11 @@ class JudoAppQt(QMainWindow):
         
         if self.app_mode == "pose":
             mode_root = os.path.join(video_root, "pose")
-        else:
+        elif self.app_mode == "detect":
             mode_root = os.path.join(video_root, "detect")
+        else:
+            # For review mode, active directories are set when loading a folder
+            return
             
         self.active_images_dir = os.path.join(mode_root, "images")
         self.active_labels_dir = os.path.join(mode_root, "labels")
@@ -278,6 +329,24 @@ class JudoAppQt(QMainWindow):
         self.annotator.update()
 
     def keyPressEvent(self, event):
+        if self.app_mode == "review":
+            if event.key() == Qt.Key.Key_S:
+                # Save & Next
+                self.save_pair()
+                if self.review_index < len(self.review_pairs) - 1:
+                    self.review_index += 1
+                    self.load_review_image(self.review_index)
+            elif event.key() == Qt.Key.Key_D:
+                # Skip to Next (Discard edits/Don't save)
+                if self.review_index < len(self.review_pairs) - 1:
+                    self.review_index += 1
+                    self.load_review_image(self.review_index)
+            elif event.key() == Qt.Key.Key_A:
+                # Previous
+                if self.review_index > 0:
+                    self.review_index -= 1
+                    self.load_review_image(self.review_index)
+
         if event.key() == Qt.Key.Key_F:
             self.chk_focus.setChecked(not self.chk_focus.isChecked())
         elif event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
@@ -347,6 +416,12 @@ class JudoAppQt(QMainWindow):
         self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
 
     def load_video(self):
+        if self.app_mode == "review":
+            path = QFileDialog.getExistingDirectory(self, "Select Dataset Folder (contains images/ and labels/)")
+            if path:
+                self.load_review_folder(path)
+            return
+
         path, _ = QFileDialog.getOpenFileName(self, "Import Video", "", "Video (*.mp4 *.avi *.mov)")
         if path:
             filename = os.path.basename(path)
@@ -368,6 +443,89 @@ class JudoAppQt(QMainWindow):
             self.slider.setRange(0, count - 1)
             self.slider.setValue(0)
             self.seek_frame(0)
+
+    def load_review_folder(self, folder_path):
+        """
+        Args:
+            self: The class instance.
+            folder_path (str): The path to the dataset directory containing 'images' and 'labels' folders.
+        """
+        self.review_pairs = []
+        images_dir = os.path.join(folder_path, "images")
+        labels_dir = os.path.join(folder_path, "labels")
+
+        if not os.path.exists(images_dir) or not os.path.exists(labels_dir):
+            QMessageBox.warning(self, "Error", "Folder must contain 'images' and 'labels' subdirectories.")
+            return
+
+        image_files = sorted(glob.glob(os.path.join(images_dir, "*.jpg")))
+        
+        for img_path in image_files:
+            filename = os.path.basename(img_path)
+            label_path = os.path.join(labels_dir, filename.replace(".jpg", ".txt"))
+            if os.path.exists(label_path):
+                self.review_pairs.append((img_path, label_path))
+
+        if not self.review_pairs:
+            QMessageBox.warning(self, "No Data", "No matching image/label pairs found.")
+            return
+
+        self.review_index = 0
+        self.active_labels_dir = labels_dir 
+        self.active_images_dir = images_dir 
+        self.load_review_image(self.review_index)
+
+    def load_review_image(self, index):
+        """
+        Args:
+            self: The class instance.
+            index (int): The index of the image/label pair in the review_pairs list to load.
+        """
+        if not (0 <= index < len(self.review_pairs)):
+            return
+
+        img_path, txt_path = self.review_pairs[index]
+        
+        # Load Image
+        bgr_img = cv2.imread(img_path)
+        if bgr_img is not None:
+            self.current_frame_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
+            self.annotator.set_image(self.current_frame_img)
+            self.annotator.selected_idx = -1
+            self.annotator.selected_kpt_idx = -1
+
+        # Load Annotations directly
+        self.annotator.annotations = []
+        try:
+            with open(txt_path, "r") as f:
+                for line in f.readlines():
+                    parts = list(map(float, line.strip().split()))
+                    class_id = int(parts[0])
+                    bbox = parts[1:5]
+                    
+                    if len(parts) > 5:
+                        # Pose format
+                        raw_kpts = parts[5:]
+                        formatted_kpts = [[raw_kpts[i], raw_kpts[i+1], int(raw_kpts[i+2])] for i in range(0, len(raw_kpts), 3)]
+                        self.annotator.annotations.append({
+                            'type': 'person', 'class_id': class_id, 
+                            'bbox': bbox, 'keypoints': formatted_kpts
+                        })
+                    else:
+                        # Detect format
+                        self.annotator.annotations.append({
+                            'type': 'object', 'label': self.get_class_name(class_id), 'class_id': class_id,
+                            'bbox': bbox, 'keypoints': None
+                        })
+        except Exception as e:
+            print(f"Error loading {txt_path}: {e}")
+
+        self.annotator.update()
+        self.lbl_status.setText(f"Reviewing {index + 1} / {len(self.review_pairs)}  |  {os.path.basename(img_path)}")
+        self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        
+        # Override the current video name so the save function writes to the correct filename
+        self.current_video_name = os.path.basename(img_path).replace(".jpg", "")
 
     # --- MODEL LOADING LOGIC ---
     def load_yolo_main(self):
@@ -616,7 +774,12 @@ class JudoAppQt(QMainWindow):
             return
         if self.current_frame_img is None: return
 
-        base_filename = f"{self.current_video_name}_{self.engine.current_frame_index:06d}"
+        # Format filename based on mode
+        if self.app_mode == "review":
+            base_filename = self.current_video_name
+        else:
+            base_filename = f"{self.current_video_name}_{self.engine.current_frame_index:06d}"
+            
         txt_path = os.path.join(self.active_labels_dir, f"{base_filename}.txt")
         
         try:
@@ -641,7 +804,7 @@ class JudoAppQt(QMainWindow):
             QMessageBox.critical(self, "Save Error", f"Image Error: {e}")
             return
             
-        self.lbl_status.setText(f"Saved to .../{self.app_mode}/: {base_filename}")
+        self.lbl_status.setText(f"Saved: {base_filename}")
         self.btn_save.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
 
 if __name__ == "__main__":
