@@ -4,7 +4,7 @@ PyQt6>=6.4.0
 numpy>=1.24.0
 
 # Deep Learning & YOLO
-ultralytics>=8.0.0
+ultralytics>=8.4.21
 torch>=2.0.0
 torchvision>=0.15.0
 
