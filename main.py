@@ -274,8 +274,8 @@ class JudoAppQt(QMainWindow):
             self.btn_load.setText("1. Load Dataset Folder")
             self.btn_add_item.setText("+ Add Item")
             self.btn_load_model.setText("N/A")
-            self.legend_group.hide() # Ensure legend is hidden in review mode
-            self.chk_show_nums.hide()
+            self.legend_group.show() # Show legend in review mode
+            self.chk_show_nums.show() # Show numbers option in review mode
             self.btn_load_compare.hide()
             self.set_playback_controls_enabled(False)
             self.instr_label.setText("Review Mode Controls:\n- S: Save & Next\n- D: Skip\n- A: Prev\n- L-Click: Drag\n- Del: Delete Item")
