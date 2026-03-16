@@ -4,6 +4,7 @@ import shutil
 import cv2
 import torch 
 import glob
+import numpy as np
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, 
                              QCheckBox, QMessageBox, QScrollArea, QFrame, QGroupBox,
@@ -272,13 +273,13 @@ class JudoAppQt(QMainWindow):
         elif self.rb_review.isChecked():
             self.app_mode = "review"
             self.btn_load.setText("1. Load Dataset Folder")
-            self.btn_add_item.setText("+ Add Item")
+            self.btn_add_item.setText("+ Add Person")
             self.btn_load_model.setText("N/A")
             self.legend_group.show() # Show legend in review mode
             self.chk_show_nums.show() # Show numbers option in review mode
             self.btn_load_compare.hide()
             self.set_playback_controls_enabled(False)
-            self.instr_label.setText("Review Mode Controls:\n- S: Save & Next\n- D: Skip\n- A: Prev\n- L-Click: Drag\n- Del: Delete Item")
+            self.instr_label.setText("Review Mode Controls:\n- S: Save & Next\n- D: Skip\n- A: Prev\n- Backspace: Delete Image\n- L-Click: Drag\n- Del: Delete Item")
         
         self.model = None
         self.btn_load_model.setStyleSheet("") 
@@ -329,6 +330,11 @@ class JudoAppQt(QMainWindow):
         self.annotator.update()
 
     def keyPressEvent(self, event):
+        """
+        Args:
+            self: The class instance.
+            event: The key press event object.
+        """
         if self.app_mode == "review":
             if event.key() == Qt.Key.Key_S:
                 # Save & Next
@@ -346,13 +352,57 @@ class JudoAppQt(QMainWindow):
                 if self.review_index > 0:
                     self.review_index -= 1
                     self.load_review_image(self.review_index)
+            elif event.key() == Qt.Key.Key_Backspace:
+                # Delete entire image/label pair
+                self.delete_current_review_image()
+                return
 
         if event.key() == Qt.Key.Key_F:
             self.chk_focus.setChecked(not self.chk_focus.isChecked())
-        elif event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
+        elif event.key() == Qt.Key.Key_Delete:
+            # Delete selected item (e.g. an extra person bounding box)
+            self.delete_selected_item()
+        elif event.key() == Qt.Key.Key_Backspace and self.app_mode != "review":
+            # For pose/detect mode, backspace also deletes the selected item
             self.delete_selected_item()
         else:
             super().keyPressEvent(event)
+            
+    def delete_current_review_image(self):
+        """
+        Deletes the currently viewed image and label files from the disk during review mode.
+        Args:
+            self: The class instance.
+        """
+        if not self.review_pairs or self.review_index >= len(self.review_pairs):
+            return
+            
+        img_path, txt_path = self.review_pairs[self.review_index]
+        
+        try:
+            if os.path.exists(img_path):
+                os.remove(img_path)
+            if os.path.exists(txt_path):
+                os.remove(txt_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Delete Error", f"Could not delete files: {e}")
+            return
+            
+        # Remove from our tracking list
+        self.review_pairs.pop(self.review_index)
+        
+        # Load the next image (or previous if we deleted the very last one in the list)
+        if self.review_index < len(self.review_pairs):
+            self.load_review_image(self.review_index)
+        elif len(self.review_pairs) > 0:
+            self.review_index -= 1
+            self.load_review_image(self.review_index)
+        else:
+            # Folder is now empty
+            self.annotator.annotations = []
+            self.annotator.set_image(np.zeros((100, 100, 3), dtype=np.uint8)) 
+            self.annotator.update()
+            self.lbl_status.setText("All images deleted.")
 
     def delete_selected_item(self):
         idx = self.annotator.selected_idx
@@ -367,9 +417,13 @@ class JudoAppQt(QMainWindow):
             QMessageBox.information(self, "Delete", "No item selected. Click a person/object first to select them.")
 
     def manual_add_item(self):
+        """
+        Args:
+            self: The class instance.
+        """
         cx, cy = 0.5, 0.5 
         
-        if self.app_mode == "pose":
+        if self.app_mode in ["pose", "review"]:
             class_id = self.get_class_id("person")
             head_y = cy - 0.3
             shoulder_y = cy - 0.2
